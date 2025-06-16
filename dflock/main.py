@@ -710,7 +710,7 @@ def show(verbose, visual):
     "--edit",
     is_flag=True,
     type=bool,
-    help="Edit the plan before executing it."
+    help="Always edit plan before executing it."
 )
 @no_hot_branch
 @clean_work_tree
@@ -739,7 +739,7 @@ def plan(strategy, edit):
     else:
         raise ValueError("This shouldn't happen")
     plan = render_plan(tree)
-    if edit:
+    if edit or strategy == "detect":
         new_plan = edit_interactively(plan + INSTRUCTIONS)
         new_plan = "\n".join(iterate_plan(new_plan))
         if not new_plan.strip():

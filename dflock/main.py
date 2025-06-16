@@ -701,22 +701,9 @@ def show(verbose, visual):
     type=bool,
     help="Edit the plan before executing it."
 )
-@click.option(
-    "-n",
-    "--no-prune",
-    is_flag=True,
-    type=bool,
-    help="Do not prune dflock branches that are not in the plan anymore",
-)
-@click.option(
-    '-y',
-    '--yes',
-    is_flag=True,
-    help="Do not ask for confirmation to apply plan."
-)
 @no_hot_branch
 @clean_work_tree
-def plan(strategy, edit, no_prune, yes):
+def plan(strategy, edit):
     """Create a plan and update local branches.
 
     The optional argument specifies the type of plan to generate. Available
@@ -752,19 +739,12 @@ def plan(strategy, edit, no_prune, yes):
     click.echo(f"{new_plan}\n")
     try:
         tree = parse_plan(new_plan)
-        if not yes:
-            yes = click.confirm(
-                "Update branches according to this plan? ('n' discards the plan)",
-                default=True
-            )
-        if yes:
-            with utils.return_to_head():
-                write_plan(tree)
-            click.echo(
-                "Branches updated. Run `dfl push` to push them to a remote."
-            )
-            if not no_prune:
-                prune_local_branches(tree)
+        with utils.return_to_head():
+            write_plan(tree)
+        click.echo(
+            "Branches updated. Run `dfl push` to push them to a remote."
+        )
+        prune_local_branches(tree)
     except ParsingError as exc:
         raise click.ClickException(str(exc))
     except (PlanError, CherryPickFailed) as exc:

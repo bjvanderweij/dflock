@@ -773,6 +773,14 @@ def remix():
 
 
 @cli_group.command()
+@inside_work_tree
+@on_local
+@clean_work_tree
+def pull():
+    subprocess.run(f"git pull --rebase \"{REMOTE}\"", shell=True)
+
+
+@cli_group.command()
 @click.option(
     "-c",
     "--commits",

@@ -781,6 +781,12 @@ def pull():
 
 
 @cli_group.command()
+@inside_work_tree
+def local():
+    subprocess.run(f"git checkout \"{LOCAL}\"", shell=True)
+
+
+@cli_group.command()
 @click.option(
     "-c",
     "--commits",

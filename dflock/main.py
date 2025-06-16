@@ -631,6 +631,13 @@ def cli():
     help="Print the push commands instead of executing them.",
 )
 @click.option(
+    "-w",
+    "--write",
+    is_flag=True,
+    type=bool,
+    help="Also detect current plan and write branches.",
+)
+@click.option(
     "-i",
     "--interactive",
     is_flag=True,
@@ -644,7 +651,15 @@ def cli():
     type=bool,
     help="Use Gitlab-specific push-options to create a merge request",
 )
-def push(remote, soft, interactive, gitlab_merge_request):
+def push(remote, soft, write, interactive, gitlab_merge_request):
+    if write:
+        tree = reconstruct_tree()
+        try:
+            with utils.return_to_head():
+                write_plan(tree)
+        except CherryPickFailed as exc:
+            exc.emit_hints()
+            raise click.ClickException(str(exc))
     tree = reconstruct_tree()
     for delta in tree.values():
         push_command = delta.get_force_push_command(

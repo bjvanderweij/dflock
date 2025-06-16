@@ -787,6 +787,20 @@ def local():
 
 
 @cli_group.command()
+@inside_work_tree
+@no_hot_branch
+@clean_work_tree
+def write():
+    tree = reconstruct_tree()
+    try:
+        with utils.return_to_head():
+            write_plan(tree)
+    except CherryPickFailed as exc:
+        exc.emit_hints()
+        raise click.ClickException(str(exc))
+
+
+@cli_group.command()
 @click.option(
     "-c",
     "--commits",

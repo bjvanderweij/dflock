@@ -444,10 +444,11 @@ def _tokenize_plan(plan: str) -> typing.Iterable[_BranchCommand]:
                 "each line should contain at least a command and a commit SHA"
             )
         if command.startswith("b"):
-            m = re.match(r"(b[0-9]*)(@(b[0-9]*))?$", command)
+            m = re.match(r"b([0-9]*)(@b?([0-9]*))?$", command)
             if not m:
                 raise ParsingError(f"unrecognized command: {command}")
             label, _, target = m.groups()
+
             yield _BranchCommand(label, target, sha)
         elif command != "s":
             raise ParsingError(f"unrecognized command: {command}")

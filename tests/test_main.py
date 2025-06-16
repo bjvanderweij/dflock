@@ -176,10 +176,19 @@ def test_parse_plan__legal_plans(local_commits):
     variant_1 = parse_plan("b 0 a\nb1@b 1 b\nb1 2 v")
     variant_2 = parse_plan("b 0 a\nb1 1 b\nb1@b 2 v")
     variant_3 = parse_plan("b 0 a\nb1@b 1 b\nb1@b 2 v")
-    assert tree == variant_1 == variant_2 == variant_3
+    variant_4 = parse_plan("b 0 a\nb1@ 1 b\nb1@b 2 v")
+    assert tree == variant_1 == variant_2 == variant_3 == variant_4
     b0 = Delta([a, c], None)
     tree = {b0.branch_name: b0}
     assert parse_plan("b 0 a\ns 1 foo\nb 2 v") == tree
+    b0 = Delta([a], None)
+    b1 = Delta([b], b0)
+    b2 = Delta([c], b1)
+    tree = {d.branch_name: d for d in [b0, b1, b2]}
+    variant_1 = parse_plan("b0 0 a\nb1@b0 1 foo\nb2@b1 2 v")
+    variant_2 = parse_plan("b 0 a\nb1@b 1 foo\nb2@1 2 v")
+    assert tree == variant_1
+    assert tree == variant_2
 
 
 @pytest.fixture

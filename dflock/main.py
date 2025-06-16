@@ -58,6 +58,17 @@ INSTRUCTIONS = """
 """
 
 
+def on_local(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        output = utils.run("rev-parse", "--abbrev-ref", "HEAD")
+        if output.strip() != LOCAL:
+            raise click.ClickException(f"You must be on your the local branch: {LOCAL}")
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
 def no_hot_branch(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -750,6 +761,15 @@ def plan(strategy, edit):
     except (PlanError, CherryPickFailed) as exc:
         exc.emit_hints()
         raise click.ClickException(str(exc))
+
+
+@cli_group.command()
+@inside_work_tree
+@undiverged
+@on_local
+@clean_work_tree
+def remix():
+    subprocess.run(f"git rebase -i \"{UPSTREAM}\"", shell=True)
 
 
 @cli_group.command()

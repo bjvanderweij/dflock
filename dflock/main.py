@@ -52,6 +52,16 @@ def on_local(f):
     return wrapper
 
 
+def inside_work_tree(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        if not is_inside_work_tree():
+            raise click.ClickException("No git repository detected.")
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
 def no_hot_branch(f) -> typing.Callable:
     @functools.wraps(f)
     def wrapper(app, *args, **kwargs):
@@ -265,6 +275,16 @@ class Delta(typing.NamedTuple):
             "Branch {self.branch_name} with commits:"
             "\n".join(f"\t{c.short_message}" for c in self.commits)
         )
+
+
+def is_inside_work_tree() -> bool:
+    try:
+        utils.run("rev-parse", "--is-inside-work-tree")
+    except subprocess.CalledProcessError as cpe:
+        if cpe.returncode == 128:
+            return False
+        raise cpe
+    return True
 
 
 def resolve_delta(name: str, branches: list[str]) -> str:
@@ -844,6 +864,7 @@ def cli():
     type=bool,
     help="Use Gitlab-specific push-options to create a merge request",
 )
+@inside_work_tree
 @pass_app
 def push(
     app,
@@ -908,6 +929,7 @@ def push(
     type=bool,
     help="Only show the plan without executing it.",
 )
+@inside_work_tree
 @pass_app
 @clean_work_tree
 @no_hot_branch
@@ -1105,6 +1127,7 @@ def write(app) -> None:
     help="Do not ask for confirmation."
 )
 @click.pass_context
+@inside_work_tree
 def reset(app, yes) -> None:
     """Reset the plan.
 

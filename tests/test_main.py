@@ -320,6 +320,16 @@ def test_reconstruct_tree_stacked(serially_dependent_commits, anchor_commit):
     }
 
 
+def test_plan__not_a_git_repo(runner):
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli_group, ["plan"])
+    assert result.exit_code == 1
+    assert (
+        "Error: No git repository detected"
+        in result.output
+    )
+
+
 @pytest.mark.parametrize("anchor_commit", ["first", "last"])
 def test_reconstruct_tree_independent(independent_commits, anchor_commit):
     c1, c2, c3, c4 = independent_commits

@@ -71,7 +71,7 @@ def no_hot_branch(f):
     return wrapper
 
 
-def undiverged_dflock(f):
+def undiverged(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         if utils.have_diverged(UPSTREAM, LOCAL):
@@ -366,7 +366,7 @@ def get_last_upstream_commit() -> Commit:
     return get_commits(UPSTREAM)[0]
 
 
-def create_or_update_branches(tree: dict[str, Delta]):
+def write_plan(tree: dict[str, Delta]):
     """Create feature branches based on the plan in tree.
 
     Start at the roots of the tree and for each branch in the topologically
@@ -470,7 +470,7 @@ def _make_commit_lists(
 
 
 def _build_tree(
-    candidate_branches: typing.Iterable[_CommitList],
+    candidate_deltas: typing.Iterable[_CommitList],
 ) -> dict[str, Delta]:
     """Parse branching plan and return a branch DAG.
 
@@ -484,7 +484,7 @@ def _build_tree(
     deltas: dict[str, Delta] = {}
     last_target_label = None
     valid_target_labels: set[None | str] = {None}
-    for d in candidate_branches:
+    for d in candidate_deltas:
         if d.target_label not in valid_target_labels:
             hints = [
                 "re-order commits with "
@@ -571,7 +571,7 @@ def get_last_n_commits(rev, n) -> list[Commit]:
 
 
 @local_and_upstream_exist
-@undiverged_dflock
+@undiverged
 def get_local_commits() -> list[Commit]:
     """Return all commits between upstream and local."""
     commits = get_commits_between(UPSTREAM, LOCAL)
@@ -759,7 +759,7 @@ def plan(strategy, edit, no_prune, yes):
             )
         if yes:
             with utils.return_to_head():
-                create_or_update_branches(tree)
+                write_plan(tree)
             click.echo(
                 "Branches updated. Run `dfl push` to push them to a remote."
             )

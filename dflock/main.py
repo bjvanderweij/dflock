@@ -263,7 +263,7 @@ def infer_delta_last_commit(commit, i, commits_by_message, tree, root) -> Delta:
             f"{commit.branch_name} does not match branch name "
             "expected based on its last commit.\n\nRun\n\ngit branch "
             "-D {commit.branch_name}\n\nto remove the offending "
-            "branch. Or run\n\ndflock reset\n\nif you'd like to start "
+            "branch. Or run\n\ndfl reset\n\nif you'd like to start "
             "with a clean slate."
         )
     target = None
@@ -761,7 +761,7 @@ def plan(strategy, edit, no_prune, yes):
             with utils.return_to_head():
                 create_or_update_branches(tree)
             click.echo(
-                "Branches updated. Run `dflock push` to push them to a remote."
+                "Branches updated. Run `dfl push` to push them to a remote."
             )
             if not no_prune:
                 prune_local_branches(tree)
@@ -822,7 +822,7 @@ def reset(yes):
     """Remove dflock-managed branches."""
     branches = get_dflock_branches()
     if len(branches) == 0:
-        click.echo("No active dflock branches found")
+        click.echo("No active branches found")
         return
     if not yes:
         click.echo("This will delete the following branches:")

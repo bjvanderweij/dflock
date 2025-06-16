@@ -10,7 +10,7 @@ import pytest
 from dflock import utils
 from dflock.main import (
     Delta, Commit, parse_plan, ParsingError, PlanError, UPSTREAM, LOCAL,
-    reconstruct_tree, create_or_update_branches, get_local_commits, render_plan,
+    reconstruct_tree, write_plan, get_local_commits, render_plan,
     build_tree, plan
 )
 
@@ -226,7 +226,7 @@ def test_reconstruct_tree__branch_anchor_first(dag_commits):
     )
     with patch("dflock.main.BRANCH_ANCHOR", "first"):
         tree = parse_plan(plan)
-        create_or_update_branches(tree)
+        write_plan(tree)
         reconstructed_tree = reconstruct_tree()
     b = Delta(commits=[c1, c2], target=None)
     b1 = Delta(commits=[c3], target=None)
@@ -248,7 +248,7 @@ def test_reconstruct_tree__branch_anchor_last(dag_commits):
     )
     with patch("dflock.main.BRANCH_ANCHOR", "last"):
         tree = parse_plan(plan)
-        create_or_update_branches(tree)
+        write_plan(tree)
         reconstructed_tree = reconstruct_tree()
     b = Delta(commits=[c1, c2], target=None)
     b1 = Delta(commits=[c3], target=None)
@@ -271,7 +271,7 @@ def test_reconstruct_tree(dag_commits, branch_anchor):
     )
     with patch("dflock.main.BRANCH_ANCHOR", branch_anchor):
         tree = parse_plan(plan)
-        create_or_update_branches(tree)
+        write_plan(tree)
         reconstructed_tree = reconstruct_tree()
         reconstructed_plan = render_plan(reconstructed_tree)
         assert reconstructed_plan == plan
@@ -290,7 +290,7 @@ def test_reconstruct_tree_stacked(serially_dependent_commits, branch_anchor):
     c1, c2, c3, c4 = serially_dependent_commits
     with patch("dflock.main.BRANCH_ANCHOR", branch_anchor):
         tree = build_tree(stack=True)
-        create_or_update_branches(tree)
+        write_plan(tree)
         reconstructed_tree = reconstruct_tree()
         reconstructed_plan = render_plan(reconstructed_tree)
         plan = (
@@ -317,7 +317,7 @@ def test_reconstruct_tree_independent(independent_commits, branch_anchor):
     c1, c2, c3, c4 = independent_commits
     with patch("dflock.main.BRANCH_ANCHOR", branch_anchor):
         tree = build_tree(stack=False)
-        create_or_update_branches(tree)
+        write_plan(tree)
         reconstructed_tree = reconstruct_tree()
         reconstructed_plan = render_plan(reconstructed_tree)
         plan = (
@@ -433,7 +433,7 @@ def test_reconstruct_tree_branch_label_first(commit, create_branch):
     b2@b {c4.sha} {c4.short_message}
     """
     tree = parse_plan(plan)
-    create_or_update_branches(tree)
+    write_plan(tree)
     reconstructed_tree = reconstruct_tree()
     b = Delta(commits=[c1, c2], target=None)
     b1 = Delta(commits=[c3], target=None)

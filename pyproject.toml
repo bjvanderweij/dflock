@@ -19,4 +19,4 @@ dev = [
 ]
 
 [project.scripts]
-dflock = "dflock.main:cli"
+dfl = "dflock.main:cli"

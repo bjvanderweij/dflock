@@ -817,6 +817,12 @@ def local():
 
 @cli_group.command()
 @inside_work_tree
+def log():
+    subprocess.run(f"git log \"{LOCAL}\" \"^{UPSTREAM}\"", shell=True)
+
+
+@cli_group.command()
+@inside_work_tree
 @click.argument("delta-reference", type=str)
 def checkout(delta_reference):
     if delta_reference in ["local", LOCAL]:

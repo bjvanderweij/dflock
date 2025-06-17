@@ -718,7 +718,7 @@ def show(verbose, visual):
 @cli_group.command()
 @click.argument(
     "strategy",
-    type=click.Choice(["detect", "stacked", "flat", "empty"]),
+    type=click.Choice(["detect", "stack", "flat", "empty"]),
     default="detect",
 )
 @click.option(
@@ -738,13 +738,13 @@ def plan(strategy, edit):
 
     \b
     detect (default): use the last-applied plan
-    stacked: package each commit in a branch and make each branch depend on the
+    stack: package each commit in a branch and make each branch depend on the
              previous branch.
     flat: package each commit in a separate independent branch
     empty: generate an empty plan
 
     """
-    if strategy == "stacked":
+    if strategy == "stack":
         tree = build_tree(stack=True)
     elif strategy == "flat":
         tree = build_tree(stack=False)

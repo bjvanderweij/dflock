@@ -740,7 +740,7 @@ def show(verbose, visual):
     "--edit",
     is_flag=True,
     type=bool,
-    help="Always edit plan before executing it."
+    help="Set this flag to always edit the plan before executing it."
 )
 @no_hot_branch
 @clean_work_tree
@@ -799,6 +799,10 @@ def plan(strategy, edit):
 @on_local
 @clean_work_tree
 def remix():
+    """Alias for `git rebase -i <upstream>`.
+
+    Only works when on local.
+    """
     subprocess.run(f"git rebase -i \"{UPSTREAM}\"", shell=True)
 
 
@@ -807,12 +811,17 @@ def remix():
 @on_local
 @clean_work_tree
 def pull():
-    subprocess.run(f"git pull --rebase \"{REMOTE}\"", shell=True)
+    """Alias for `git pull --rebase <upstream>`.
+
+    Only works when on local.
+    """
+    subprocess.run(f"git pull --rebase \"{UPSTREAM}\"", shell=True)
 
 
 @cli_group.command()
 @inside_work_tree
 def log():
+    """Alias for `git log <local> ^<upstream>`."""
     subprocess.run(f"git log \"{LOCAL}\" \"^{UPSTREAM}\"", shell=True)
 
 
@@ -820,6 +829,16 @@ def log():
 @inside_work_tree
 @click.argument("delta-reference", type=str)
 def checkout(delta_reference):
+    """Checkout DELTA_REFERENCE.
+
+    If DELTA_REFERENCE is "local" or the name of your local branch, checkout
+    your local branch.
+
+    If DELTA_REFERENCE is a number (optionally prefixed by 'b'), go to the
+    delta with that index.
+
+    Otherwise, try to do a partial match against your delta branch names.
+    This only works if there is a unique match."""
     if delta_reference in ["local", LOCAL]:
         branch = LOCAL
     else:

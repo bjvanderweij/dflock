@@ -643,13 +643,6 @@ def cli():
     type=str,
 )
 @click.option(
-    "-s",
-    "--soft",
-    is_flag=True,
-    type=bool,
-    help="Print the push commands instead of executing them.",
-)
-@click.option(
     "-w",
     "--write",
     is_flag=True,
@@ -670,7 +663,7 @@ def cli():
     type=bool,
     help="Use Gitlab-specific push-options to create a merge request",
 )
-def push(delta_references, remote, soft, write, interactive, gitlab_merge_request):
+def push(delta_references, remote, write, interactive, gitlab_merge_request):
     tree = reconstruct_tree()
     if write:
         try:
@@ -688,22 +681,18 @@ def push(delta_references, remote, soft, write, interactive, gitlab_merge_reques
             raise click.ClickException(exc)
         deltas = [tree[n] for n in names]
     for delta in deltas:
-        push_command = delta.get_force_push_command(
-            remote, gitlab_merge_request=gitlab_merge_request
-        )
-        do_it = True
         if interactive:
             do_it = click.confirm(
                 f"Push {delta.branch_name} to {remote}?", default=True
             )
-        if soft:
-            click.echo(f"git {' '.join(push_command)}")
-        elif do_it:
+        if not interactive or do_it:
+            push_command = delta.get_force_push_command(
+                remote, gitlab_merge_request=gitlab_merge_request
+            )
             click.echo(f"Pushing {delta.branch_name}.")
             output = utils.run(*push_command)
             click.echo(output)
-    if not soft:
-        click.echo("Done.")
+    click.echo("Done.")
 
 
 @cli_group.command

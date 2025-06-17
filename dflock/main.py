@@ -632,8 +632,13 @@ def cli():
 
 @cli_group.command
 @click.argument(
-    "remote",
-    nargs=1,
+    "delta-references",
+    nargs=-1,
+    type=str,
+)
+@click.option(
+    "-r",
+    "--remote",
     default=REMOTE,
     type=str,
 )
@@ -665,17 +670,24 @@ def cli():
     type=bool,
     help="Use Gitlab-specific push-options to create a merge request",
 )
-def push(remote, soft, write, interactive, gitlab_merge_request):
+def push(delta_references, remote, soft, write, interactive, gitlab_merge_request):
+    tree = reconstruct_tree()
     if write:
-        tree = reconstruct_tree()
         try:
             with utils.return_to_head():
                 write_plan(tree)
         except CherryPickFailed as exc:
             exc.emit_hints()
             raise click.ClickException(str(exc))
-    tree = reconstruct_tree()
-    for delta in tree.values():
+    deltas = list(tree.values())
+    if len(delta_references) > 0:
+        branches = [d.branch_name for d in deltas]
+        try:
+            names = [resolve_delta(d, branches) for d in delta_references]
+        except ValueError as exc:
+            raise click.ClickException(exc)
+        deltas = [tree[n] for n in names]
+    for delta in deltas:
         push_command = delta.get_force_push_command(
             remote, gitlab_merge_request=gitlab_merge_request
         )

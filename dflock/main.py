@@ -246,6 +246,20 @@ class Delta(typing.NamedTuple):
         )
 
 
+def resolve_delta(name: str, branches: list[str]):
+    name = name.strip()
+    if not re.match(r"^[\w-]+$", name):
+        raise ValueError(f"Invalid name: {name}")
+    if m := re.match(r"^b?([0-9]+)$", name):
+        index = int(m.group(1))
+        if index < len(branches):
+            return branches[index]
+    matching_branches = [b for b in branches if name.lower() in b.lower()]
+    if len(matching_branches) == 1:
+        return matching_branches[0]
+    raise ValueError(f"Could not match {name} to a unique branch")
+
+
 def get_delta_branches() -> list[str]:
     branches = utils.get_local_branches()
     commits = get_local_commits()
@@ -799,6 +813,21 @@ def pull():
 @inside_work_tree
 def local():
     subprocess.run(f"git checkout \"{LOCAL}\"", shell=True)
+
+
+@cli_group.command()
+@inside_work_tree
+@click.argument("delta-reference", type=str)
+def checkout(delta_reference):
+    if delta_reference in ["local", LOCAL]:
+        branch = LOCAL
+    else:
+        branches = get_delta_branches()
+        try:
+            branch = resolve_delta(delta_reference, branches)
+        except ValueError as exc:
+            raise click.ClickException(exc)
+    subprocess.run(f"git checkout {branch}", shell=True)
 
 
 @cli_group.command()

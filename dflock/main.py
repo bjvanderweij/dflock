@@ -246,11 +246,10 @@ class Delta(typing.NamedTuple):
         )
 
 
-def get_dflock_branches():
-    local_branches = utils.get_local_branches()
+def get_delta_branches() -> list[str]:
+    branches = utils.get_local_branches()
     commits = get_local_commits()
-    branch_names = [c.branch_name for c in commits]
-    return [b for b in local_branches if b in branch_names]
+    return [c.branch_name for c in commits if c.branch_name in branches]
 
 
 def build_tree(stack: bool = True) -> dict[str, Delta]:
@@ -837,10 +836,10 @@ def branches(commits: bool, show_targets: bool):
     For all commits between origin/develop and the tip of local develop
     find, feature branches with a branch name derived from that commit.
     """
-    branches = get_dflock_branches()
+    branches = get_delta_branches()
     if show_targets or commits:
         tree = reconstruct_tree()
-    for branch_name in branches:
+    for branch_name in reversed(branches):
         if show_targets:
             delta = tree[branch_name]
             target = UPSTREAM
@@ -864,7 +863,7 @@ def branches(commits: bool, show_targets: bool):
 )
 def reset(yes):
     """Remove dflock-managed branches."""
-    branches = get_dflock_branches()
+    branches = get_delta_branches()
     if len(branches) == 0:
         click.echo("No active branches found")
         return

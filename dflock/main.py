@@ -61,8 +61,7 @@ INSTRUCTIONS = """
 def on_local(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
-        output = utils.run("rev-parse", "--abbrev-ref", "HEAD")
-        if output.strip() != LOCAL:
+        if utils.get_current_branch() != LOCAL:
             raise click.ClickException(f"You must be on your the local branch: {LOCAL}")
         return f(*args, **kwargs)
 
@@ -267,7 +266,11 @@ def get_delta_branches() -> list[str]:
 
 
 def build_tree(stack: bool = True) -> dict[str, Delta]:
-    """Use local commits create a tree of stacked branches."""
+    """Create a simple plan including all local commits.
+
+    If stack is False, treat every commit as an independent delta, otherwise
+    create a stack of deltas.
+    """
     commits = get_local_commits()
     tree: dict[str, Delta] = {}
     target = None

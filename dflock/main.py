@@ -699,40 +699,6 @@ def push(delta_references, remote, write, interactive, gitlab_merge_request):
     click.echo("Done.")
 
 
-@cli_group.command
-@click.option(
-    "-v",
-    "--verbose",
-    is_flag=True,
-    type=bool,
-    help="Print relevant dflock configuration",
-)
-@click.option(
-    "-V",
-    "--visual",
-    is_flag=True,
-    type=bool,
-    help="Render a visual representation of the plan",
-)
-def deltas(verbose, visual):
-    """Display deltas."""
-    if verbose:
-        click.echo(f"upstream: {UPSTREAM}")
-        click.echo(f"local: {LOCAL}\n")
-    tree = reconstruct_tree()
-    if visual:
-        dot = graphviz.Digraph()
-        dot.node(UPSTREAM)
-        for delta in tree.values():
-            dot.node(delta.branch_name)
-            target = UPSTREAM if delta.target is None else delta.target.branch_name
-            dot.edge(delta.branch_name, target)
-        with tempfile.NamedTemporaryFile() as f:
-            dot.render(format="png", filename=f.name, view=True)
-    else:
-        click.echo(render_plan(tree))
-
-
 @cli_group.command()
 @click.argument(
     "strategy",
@@ -746,9 +712,16 @@ def deltas(verbose, visual):
     type=bool,
     help="Set this flag to always edit the plan before executing it."
 )
+@click.option(
+    "-s",
+    "--show",
+    is_flag=True,
+    type=bool,
+    help="Only show the plan without executing it.",
+)
 @no_hot_branch
 @clean_work_tree
-def plan(strategy, edit):
+def plan(strategy, edit, show):
     """Create a plan and update local branches.
 
     The optional argument specifies the type of plan to generate. Available
@@ -773,7 +746,7 @@ def plan(strategy, edit):
     else:
         raise ValueError("This shouldn't happen")
     plan = render_plan(tree)
-    if edit or strategy == "detect":
+    if (edit or strategy == "detect") and not show:
         new_plan = edit_interactively(plan + INSTRUCTIONS)
         new_plan = "\n".join(iterate_plan(new_plan))
         if not new_plan.strip():
@@ -782,19 +755,20 @@ def plan(strategy, edit):
     else:
         new_plan = plan
     click.echo(f"{new_plan}\n")
-    try:
-        tree = parse_plan(new_plan)
-        with utils.return_to_head():
-            write_plan(tree)
-        click.echo(
-            "Branches updated. Run `dfl push` to push them to a remote."
-        )
-        prune_local_branches(tree)
-    except ParsingError as exc:
-        raise click.ClickException(str(exc))
-    except (PlanError, CherryPickFailed) as exc:
-        exc.emit_hints()
-        raise click.ClickException(str(exc))
+    if not show:
+        try:
+            tree = parse_plan(new_plan)
+            with utils.return_to_head():
+                write_plan(tree)
+            click.echo(
+                "Branches updated. Run `dfl push` to push them to a remote."
+            )
+            prune_local_branches(tree)
+        except ParsingError as exc:
+            raise click.ClickException(str(exc))
+        except (PlanError, CherryPickFailed) as exc:
+            exc.emit_hints()
+            raise click.ClickException(str(exc))
 
 
 @cli_group.command()

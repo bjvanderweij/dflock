@@ -573,6 +573,15 @@ def prune_local_branches(tree):
         utils.run("branch", "-D", branch_name)
 
 
+def get_remote_tracking_branch(branch):
+    return utils.run("for-each-ref", "--format=%(upstream:short)", f"refs/heads/{branch}").strip()
+
+
+def branch_up_to_date(branch):
+    remote_tracking_branch = get_remote_tracking_branch(branch)
+    return utils.run("rev-parse", remote_tracking_branch) == utils.run("rev-parse", branch)
+
+
 def get_commits_between(rev_a, rev_b) -> list[Commit]:
     """Return commits from rev_a up to and including rev_b."""
     return get_commits(f"{rev_a}..{rev_b}")
@@ -769,6 +778,25 @@ def plan(strategy, edit, show):
         except (PlanError, CherryPickFailed) as exc:
             exc.emit_hints()
             raise click.ClickException(str(exc))
+
+
+@cli_group.command()
+@inside_work_tree
+@click.pass_context
+def status(ctx):
+    diverged = utils.have_diverged(UPSTREAM, LOCAL)
+    branches = get_delta_branches()
+    on_local = utils.get_current_branch() == LOCAL
+    if on_local:
+        click.echo("On local branch.")
+    else:
+        click.echo("NOT on local branch.")
+    if diverged:
+        click.echo("Local and upstream have diverged")
+    click.echo("\nDeltas:")
+    for branch in branches:
+        up_to_date = branch_up_to_date(branch)
+        click.echo(f"\t{branch}{'' if up_to_date else ' (diverged from remote)'}")
 
 
 @cli_group.command()

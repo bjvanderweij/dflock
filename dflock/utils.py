@@ -63,7 +63,7 @@ def have_diverged(rev_a, rev_b):
 
 
 def get_current_branch():
-    run("rev-parse", "--abbrev-ref", "HEAD")
+    return run("rev-parse", "--abbrev-ref", "HEAD").strip()
 
 
 @contextmanager

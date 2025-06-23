@@ -47,9 +47,11 @@ INSTRUCTIONS = """
 #
 # Commands:
 # u = use commit in single-commit branch
-# u@b<target-label> <commit> = use commit in single-commit branch off branch with target-label
+# u@b<target-label> <commit> = use commit in single-commit branch off branch
+#                              with target-label
 # b<label> <commit> = use commit in labeled branch
-# b<label>@b<target-label> <commit> = use commit in labeled branch off branch with target-label
+# b<label>@b<target-label> <commit> = use commit in labeled branch off branch
+#                                     with target-label
 # s <commit> = do not use commit
 #
 # If you delete a line, the commit will not be used (equivalent to "s")
@@ -68,7 +70,7 @@ def on_local(f):
     return wrapper
 
 
-def no_hot_branch(f):
+def no_hot_branch(f) -> typing.Callable:
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
         if utils.get_current_branch() in _get_hot_branches():
@@ -179,7 +181,7 @@ class Delta(typing.NamedTuple):
             return self.commits[-1].branch_name
 
     @property
-    def full_branch_name(self):
+    def full_branch_name(self) -> str:
         return f"refs/heads/{self.branch_name}"
 
     @property
@@ -189,13 +191,13 @@ class Delta(typing.NamedTuple):
         else:
             return self.target.branch_name
 
-    def branch_exists(self):
+    def branch_exists(self) -> bool:
         return utils.object_exists(self.full_branch_name)
 
-    def delete_branch(self):
+    def delete_branch(self) -> None:
         utils.run("branch", "-D", self.branch_name)
 
-    def create_branch(self):
+    def create_branch(self) -> None:
         utils.checkout("-b", self.branch_name)
 
     @property
@@ -206,7 +208,7 @@ class Delta(typing.NamedTuple):
             f"git cherry-pick {' '.join([c.sha for c in self.commits])}"
         )
 
-    def cherry_pick(self):
+    def cherry_pick(self) -> None:
         try:
             utils.run("cherry-pick", *[c.sha for c in self.commits])
         except subprocess.CalledProcessError:
@@ -221,7 +223,7 @@ class Delta(typing.NamedTuple):
 
     def get_force_push_command(
         self, remote: str, gitlab_merge_request: bool = False
-    ):
+    ) -> list[str]:
         command = [
             "push",
             "--force",
@@ -238,14 +240,14 @@ class Delta(typing.NamedTuple):
                 ]
         return command
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (
             "Branch {self.branch_name} with commits:"
             "\n".join(f"\t{c.short_message}" for c in self.commits)
         )
 
 
-def resolve_delta(name: str, branches: list[str]):
+def resolve_delta(name: str, branches: list[str]) -> str:
     name = name.strip()
     if not re.match(r"^[\w-]+$", name):
         raise ValueError(f"Invalid name: {name}")
@@ -317,7 +319,8 @@ def infer_delta_last_commit(commit, i, commits_by_message, tree, root) -> Delta:
         else:
             if cc.message != root.message:
                 click.echo(
-                    f"warning: unknown commit message encountered: {cc.short_message}"
+                    "warning: unknown commit message encountered: "
+                    + cc.short_message
                 )
             break
     return Delta(commits, target)
@@ -332,14 +335,19 @@ def infer_delta_first_commit(commit, i, commits_by_message, tree, root) -> Delta
         commit.branch_name
     )
     for delta in tree.values():
-        if delta.commits[-1].message == candidate_commits[start_index - 1].message:
+        if (
+            delta.commits[-1].message
+            == candidate_commits[start_index - 1].message
+        ):
             target = delta
             break
     for cc in candidate_commits[start_index:]:
         if cc.message in commits_by_message:
             branch_commits.append(commits_by_message[cc.message])
         else:
-            click.echo(f"warning: unknown commit message encountered: {cc.message}")
+            click.echo(
+                f"warning: unknown commit message encountered: {cc.message}"
+            )
             break
     return Delta(branch_commits, target)
 
@@ -397,8 +405,8 @@ def write_plan(tree: dict[str, Delta]):
     """Create feature branches based on the plan in tree.
 
     Start at the roots of the tree and for each branch in the topologically
-    sorted branches, checkout its target (UPSTREAM if None), delete the branch
-    if it already exists, create the branch, cherry-pick its commits.
+    sorted branches, checkout its target (the upstream if None), delete the
+    branch if it already exists, create the branch, cherry-pick its commits.
 
     Return a dictionary that maps each branch name to a boolean that is True
     only if the branch already existed and was re-created.
@@ -519,7 +527,7 @@ def _build_tree(
                 f"`git rebase --interactive {LOCAL} {UPSTREAM}`"
             ]
             raise PlanError(
-                f"invalid target for {d.label}: {d.target_label}",
+                f"invalid target for \"{d.label}\": \"{d.target_label}\"",
                 hints=hints
             )
         target_branch = None
@@ -547,7 +555,10 @@ def render_plan(tree: dict[str, Delta]) -> str:
         command = "s"
         delta = None
         try:
-            d_i, delta = next((i, d) for i, d in enumerate(sorted_deltas) if commit in d.commits)
+            d_i, delta = next(
+                (i, d) for i, d in enumerate(sorted_deltas)
+                if commit in d.commits
+            )
         except StopIteration:
             pass
         if delta is not None:
@@ -691,7 +702,7 @@ def push(delta_references, remote, write, interactive, gitlab_merge_request):
         try:
             names = [resolve_delta(d, branches) for d in delta_references]
         except ValueError as exc:
-            raise click.ClickException(exc)
+            raise click.ClickException(str(exc))
         deltas = [tree[n] for n in names]
     for delta in deltas:
         if interactive:
@@ -705,7 +716,7 @@ def push(delta_references, remote, write, interactive, gitlab_merge_request):
             click.echo(f"Pushing {delta.branch_name}.")
             output = utils.run(*push_command)
             click.echo(output)
-    click.echo("Done.")
+    click.echo("Delta branches updated.")
 
 
 @cli_group.command()
@@ -852,7 +863,7 @@ def checkout(delta_reference):
         try:
             branch = resolve_delta(delta_reference, branches)
         except ValueError as exc:
-            raise click.ClickException(exc)
+            raise click.ClickException(str(exc))
     subprocess.run(f"git checkout {branch}", shell=True)
 
 

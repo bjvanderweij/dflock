@@ -1,6 +1,3 @@
-import tempfile
-import os
-import subprocess
 from click.testing import CliRunner
 from unittest.mock import patch
 from pathlib import Path
@@ -9,21 +6,34 @@ from functools import partial
 import pytest
 from dflock import utils
 from dflock.main import (
-    Delta, Commit, parse_plan, ParsingError, PlanError, UPSTREAM, LOCAL,
+    cli_group, Delta, Commit, parse_plan, ParsingError, PlanError,
     reconstruct_tree, write_plan, get_local_commits, render_plan,
-    build_tree, plan
+    build_tree, read_config
 )
+
+UPSTREAM = "upstream"
+LOCAL = "local"
+REMOTE = ""
+BRANCH_TEMPLATE = "test/{}"
+BRANCH_ANCHOR = "first"
+TEST_CONFIG = f"""[dflock]
+upstream={UPSTREAM}
+local={LOCAL}
+remote={REMOTE}
+branch-template={BRANCH_TEMPLATE}
+"""
 
 
 @pytest.fixture(autouse=True)
 def configuration(tmp_path):
-    with patch("dflock.main.UPSTREAM", "upstream"):
-        with patch("dflock.main.LOCAL", "local"):
-            global UPSTREAM
-            global LOCAL
-            UPSTREAM = "upstream"
-            LOCAL = "local"
-            yield
+    test_config_path = tmp_path / ".dflock"
+
+    def new_read_config(ctx, cmd, path):
+        return read_config(ctx, cmd, test_config_path)
+    with open(test_config_path, "w") as f:
+        f.write(TEST_CONFIG)
+    with patch("dflock.main.read_config", new_read_config):
+        yield
 
 
 @pytest.fixture()
@@ -38,18 +48,7 @@ def git_repository(tmp_path):
 
 @pytest.fixture()
 def runner():
-    return CliRunner()
-
-
-@pytest.fixture()
-def dflock(git_repository):
-    def run(cmd):
-        subprocess.run(
-            ["python", "-m" "dflock.main", *cmd],
-            cwd=git_repository,
-            env=dict(PYTHONPATH=os.getcwd()),
-        )
-    return run
+    yield CliRunner()
 
 
 @pytest.fixture()
@@ -93,7 +92,9 @@ def commit_c(git_repository):
 
 @pytest.fixture()
 def local_commits():
-    commits = [Commit("0", "a"), Commit("1", "b"), Commit("2", "c"), Commit("3", "d")]
+    commits = [
+        Commit("0", "a"), Commit("1", "b"), Commit("2", "c"), Commit("3", "d")
+    ]
     with patch("dflock.main.get_local_commits", return_value=commits):
         yield commits
 
@@ -126,67 +127,74 @@ def checkout(git_repository):
 
 
 def test_parse_plan__syntax_errors(local_commits):
+    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
     with pytest.raises(ParsingError):
-        parse_plan("s 0 a\na 1 b\ns 2 v") == {}
+        parse_plan("s 0 a\na 1 b\ns 2 v", *config_args) == {}
     with pytest.raises(ParsingError):
-        parse_plan("b@ 0 a") == {}
+        parse_plan("b@s 0 a", *config_args) == {}
     with pytest.raises(ParsingError):
-        parse_plan("s 0 a\nb\ns 2 v") == {}
+        parse_plan("s 0 a\nb\ns 2 v", *config_args) == {}
 
 
 def test_parse_plan__illegal_plans(local_commits):
+    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
     with pytest.raises(PlanError, match="cannot match"):
         # Unrecognized commit
-        parse_plan("s 0 a\nb1 a\ns 2 v") == {}
+        parse_plan("s 0 a\nb1 a\ns 2 v", *config_args) == {}
     with pytest.raises(PlanError, match="cannot match"):
         # Out of order commits
-        parse_plan("b 1 a\nb 0 foo") == {}
+        parse_plan("b 1 a\nb 0 foo", *config_args) == {}
     with pytest.raises(PlanError, match="invalid target"):
         # Non contiguous commits in branch
-        parse_plan("b 0 a\nb1@b 1 foo\nb  2 v") == {}
+        parse_plan("b 0 a\nb1@b 1 foo\nb  2 v", *config_args) == {}
     with pytest.raises(PlanError, match="invalid target"):
         # Incorrect target
-        parse_plan("b@b1 0 a\nb1 1 foo") == {}
+        parse_plan("b@b1 0 a\nb1 1 foo", *config_args) == {}
     with pytest.raises(PlanError, match="multiple targets"):
         # Conflicting targets
-        parse_plan("b 0 a\nb1 1\nb2@b 2 v\nb2@b1 3") == {}
+        parse_plan("b 0 a\nb1 1\nb2@b 2 v\nb2@b1 3", *config_args) == {}
     with pytest.raises(PlanError, match="invalid target"):
         # "Crossing" branches
-        parse_plan("b 0 a\nb1@b 1 foo\nb2 2 v") == {}
+        parse_plan("b 0 a\nb1@b 1 foo\nb2 2 v", *config_args) == {}
 
 
-def test_parse_plan__legal_plans(local_commits):
+@pytest.mark.parametrize("branch_anchor", ["first", "last"])
+def test_parse_plan__legal_plans(local_commits, branch_anchor):
+    config_args = [branch_anchor, UPSTREAM, BRANCH_TEMPLATE]
+    config_args_parse = [LOCAL, UPSTREAM, branch_anchor, BRANCH_TEMPLATE]
     a, b, c, d = local_commits
     # Equivalent plans
-    delta = Delta([c], None)
+    delta = Delta([c], None, *config_args)
     tree = {delta.branch_name: delta}
-    v0 = parse_plan("s 0 a\ns 1 b\nb0 2 v")
-    v1 = parse_plan("s 0 a\nb0 2 v")
-    v2 = parse_plan("b0 2 v")
-    v3 = parse_plan("b 2 v")
-    v4 = parse_plan("b 2")
+    v0 = parse_plan("s 0 a\ns 1 b\nb0 2 v", *config_args_parse)
+    v1 = parse_plan("s 0 a\nb0 2 v", *config_args_parse)
+    v2 = parse_plan("b0 2 v", *config_args_parse)
+    v3 = parse_plan("b 2 v", *config_args_parse)
+    v4 = parse_plan("b 2", *config_args_parse)
     assert v0 == v1 == v2 == v3 == v4 == tree
     # Empty plans
-    assert parse_plan("") == {}
-    assert parse_plan("s 0 a\ns 1 b\ns 2 v") == {}
+    assert parse_plan("", *config_args_parse) == {}
+    assert parse_plan("s 0 a\ns 1 b\ns 2 v", *config_args_parse) == {}
     # Optional target specifications
-    b0 = Delta([a], None)
-    b1 = Delta([b, c], b0)
+    b0 = Delta([a], None, *config_args)
+    b1 = Delta([b, c], b0, *config_args)
     tree = {d.branch_name: d for d in [b0, b1]}
-    variant_1 = parse_plan("b 0 a\nb1@b 1 b\nb1 2 v")
-    variant_2 = parse_plan("b 0 a\nb1 1 b\nb1@b 2 v")
-    variant_3 = parse_plan("b 0 a\nb1@b 1 b\nb1@b 2 v")
-    variant_4 = parse_plan("b 0 a\nb1@ 1 b\nb1@b 2 v")
+    variant_1 = parse_plan("b 0 a\nb1@b 1 b\nb1 2 v", *config_args_parse)
+    variant_2 = parse_plan("b 0 a\nb1 1 b\nb1@b 2 v", *config_args_parse)
+    variant_3 = parse_plan("b 0 a\nb1@b 1 b\nb1@b 2 v", *config_args_parse)
+    variant_4 = parse_plan("b 0 a\nb1@ 1 b\nb1@b 2 v", *config_args_parse)
     assert tree == variant_1 == variant_2 == variant_3 == variant_4
-    b0 = Delta([a, c], None)
+    b0 = Delta([a, c], None, *config_args)
     tree = {b0.branch_name: b0}
-    assert parse_plan("b 0 a\ns 1 foo\nb 2 v") == tree
-    b0 = Delta([a], None)
-    b1 = Delta([b], b0)
-    b2 = Delta([c], b1)
+    assert parse_plan("b 0 a\ns 1 foo\nb 2 v", *config_args_parse) == tree
+    b0 = Delta([a], None, *config_args)
+    b1 = Delta([b], b0, *config_args)
+    b2 = Delta([c], b1, *config_args)
     tree = {d.branch_name: d for d in [b0, b1, b2]}
-    variant_1 = parse_plan("b0 0 a\nb1@b0 1 foo\nb2@b1 2 v")
-    variant_2 = parse_plan("b 0 a\nb1@b 1 foo\nb2@1 2 v")
+    variant_1 = parse_plan(
+        "b0 0 a\nb1@b0 1 foo\nb2@b1 2 v", *config_args_parse
+    )
+    variant_2 = parse_plan("b 0 a\nb1@b 1 foo\nb2@1 2 v", *config_args_parse)
     assert tree == variant_1
     assert tree == variant_2
 
@@ -200,7 +208,7 @@ def independent_commits(commit, create_branch):
     commit(dict(c="c"), "3")
     commit(dict(d="d"), "4")
     create_branch(LOCAL)
-    return get_local_commits()
+    return get_local_commits(LOCAL, UPSTREAM)
 
 
 @pytest.fixture
@@ -212,7 +220,7 @@ def serially_dependent_commits(commit, create_branch):
     commit(dict(a="d"), "3")
     commit(dict(a="e"), "4")
     create_branch(LOCAL)
-    return get_local_commits()
+    return get_local_commits(LOCAL, UPSTREAM)
 
 
 @pytest.fixture
@@ -224,10 +232,11 @@ def dag_commits(commit, create_branch):
     commit(dict(b="a"), "3")
     commit(dict(a="d"), "4")
     create_branch(LOCAL)
-    return get_local_commits()
+    return get_local_commits(LOCAL, UPSTREAM)
 
 
-def test_reconstruct_tree__branch_anchor_first(dag_commits):
+@pytest.mark.parametrize("branch_anchor", ["first", "last"])
+def test_reconstruct_tree__branch_anchor(branch_anchor, dag_commits):
     c1, c2, c3, c4 = dag_commits
     plan = (
         f"b0 {c1.short_str}\n"
@@ -235,40 +244,25 @@ def test_reconstruct_tree__branch_anchor_first(dag_commits):
         f"b1 {c3.short_str}\n"
         f"b2@b0 {c4.short_str}"
     )
-    with patch("dflock.main.BRANCH_ANCHOR", "first"):
-        tree = parse_plan(plan)
-        write_plan(tree)
-        reconstructed_tree = reconstruct_tree()
-    b = Delta(commits=[c1, c2], target=None)
-    b1 = Delta(commits=[c3], target=None)
-    b2 = Delta(commits=[c4], target=b)
-    assert reconstructed_tree == {
-        c1.branch_name: b,
-        c3.branch_name: b1,
-        c4.branch_name: b2,
-    }
-
-
-def test_reconstruct_tree__branch_anchor_last(dag_commits):
-    c1, c2, c3, c4 = dag_commits
-    plan = (
-        f"b0 {c1.short_str}\n"
-        f"b0 {c2.short_str}\n"
-        f"b1 {c3.short_str}\n"
-        f"b2@b0 {c4.short_str}"
-    )
-    with patch("dflock.main.BRANCH_ANCHOR", "last"):
-        tree = parse_plan(plan)
-        write_plan(tree)
-        reconstructed_tree = reconstruct_tree()
-    b = Delta(commits=[c1, c2], target=None)
-    b1 = Delta(commits=[c3], target=None)
-    b2 = Delta(commits=[c4], target=b)
-    assert reconstructed_tree == {
-        c2.branch_name: b,
-        c3.branch_name: b1,
-        c4.branch_name: b2,
-    }
+    config_args = [LOCAL, UPSTREAM, branch_anchor, BRANCH_TEMPLATE]
+    tree = parse_plan(plan, *config_args)
+    write_plan(tree)
+    reconstructed_tree = reconstruct_tree(*config_args)
+    b = Delta([c1, c2], None, branch_anchor, UPSTREAM, BRANCH_TEMPLATE)
+    b1 = Delta([c3], None, branch_anchor, UPSTREAM, BRANCH_TEMPLATE)
+    b2 = Delta([c4], b, branch_anchor, UPSTREAM, BRANCH_TEMPLATE)
+    if branch_anchor == "first":
+        assert reconstructed_tree == {
+            c1.get_branch_name(BRANCH_TEMPLATE): b,
+            c3.get_branch_name(BRANCH_TEMPLATE): b1,
+            c4.get_branch_name(BRANCH_TEMPLATE): b2,
+        }
+    else:
+        assert reconstructed_tree == {
+            c2.get_branch_name(BRANCH_TEMPLATE): b,
+            c3.get_branch_name(BRANCH_TEMPLATE): b1,
+            c4.get_branch_name(BRANCH_TEMPLATE): b2,
+        }
 
 
 @pytest.mark.parametrize("branch_anchor", ["first", "last"])
@@ -280,74 +274,79 @@ def test_reconstruct_tree(dag_commits, branch_anchor):
         f"b1 {c3.short_str}\n"
         f"b2@b0 {c4.short_str}"
     )
-    with patch("dflock.main.BRANCH_ANCHOR", branch_anchor):
-        tree = parse_plan(plan)
-        write_plan(tree)
-        reconstructed_tree = reconstruct_tree()
-        reconstructed_plan = render_plan(reconstructed_tree)
-        assert reconstructed_plan == plan
-        b0 = Delta(commits=[c1, c2], target=None)
-        b1 = Delta(commits=[c3], target=None)
-        b2 = Delta(commits=[c4], target=b0)
-        assert reconstructed_tree == {
-            b0.branch_name: b0,
-            b1.branch_name: b1,
-            b2.branch_name: b2,
-        }
+    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    tree = parse_plan(plan, *config_args)
+    write_plan(tree)
+    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    reconstructed_tree = reconstruct_tree(*config_args)
+    reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
+    assert reconstructed_plan == plan
+    b0 = Delta([c1, c2], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b1 = Delta([c3], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b2 = Delta([c4], b0, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    assert reconstructed_tree == {
+        b0.branch_name: b0,
+        b1.branch_name: b1,
+        b2.branch_name: b2,
+    }
 
 
 @pytest.mark.parametrize("branch_anchor", ["first", "last"])
 def test_reconstruct_tree_stacked(serially_dependent_commits, branch_anchor):
     c1, c2, c3, c4 = serially_dependent_commits
-    with patch("dflock.main.BRANCH_ANCHOR", branch_anchor):
-        tree = build_tree(stack=True)
-        write_plan(tree)
-        reconstructed_tree = reconstruct_tree()
-        reconstructed_plan = render_plan(reconstructed_tree)
-        plan = (
-            f"b0 {c1.short_str}\n"
-            f"b1@b0 {c2.short_str}\n"
-            f"b2@b1 {c3.short_str}\n"
-            f"b3@b2 {c4.short_str}"
-        )
-        assert reconstructed_plan == plan
-        b0 = Delta(commits=[c1], target=None)
-        b1 = Delta(commits=[c2], target=b0)
-        b2 = Delta(commits=[c3], target=b1)
-        b3 = Delta(commits=[c4], target=b2)
-        assert reconstructed_tree == {
-            b0.branch_name: b0,
-            b1.branch_name: b1,
-            b2.branch_name: b2,
-            b3.branch_name: b3,
-        }
+    tree = build_tree(
+        LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE, stack=True
+    )
+    write_plan(tree)
+    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    reconstructed_tree = reconstruct_tree(*config_args)
+    reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
+    plan = (
+        f"b0 {c1.short_str}\n"
+        f"b1@b0 {c2.short_str}\n"
+        f"b2@b1 {c3.short_str}\n"
+        f"b3@b2 {c4.short_str}"
+    )
+    assert reconstructed_plan == plan
+    b0 = Delta([c1], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b1 = Delta([c2], b0, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b2 = Delta([c3], b1, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b3 = Delta([c4], b2, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    assert reconstructed_tree == {
+        b0.branch_name: b0,
+        b1.branch_name: b1,
+        b2.branch_name: b2,
+        b3.branch_name: b3,
+    }
 
 
 @pytest.mark.parametrize("branch_anchor", ["first", "last"])
 def test_reconstruct_tree_independent(independent_commits, branch_anchor):
     c1, c2, c3, c4 = independent_commits
-    with patch("dflock.main.BRANCH_ANCHOR", branch_anchor):
-        tree = build_tree(stack=False)
-        write_plan(tree)
-        reconstructed_tree = reconstruct_tree()
-        reconstructed_plan = render_plan(reconstructed_tree)
-        plan = (
-            f"b0 {c1.short_str}\n"
-            f"b1 {c2.short_str}\n"
-            f"b2 {c3.short_str}\n"
-            f"b3 {c4.short_str}"
-        )
-        assert reconstructed_plan == plan
-        b0 = Delta(commits=[c1], target=None)
-        b1 = Delta(commits=[c2], target=None)
-        b2 = Delta(commits=[c3], target=None)
-        b3 = Delta(commits=[c4], target=None)
-        assert reconstructed_tree == {
-            b0.branch_name: b0,
-            b1.branch_name: b1,
-            b2.branch_name: b2,
-            b3.branch_name: b3,
-        }
+    tree = build_tree(
+        LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE, stack=False
+    )
+    write_plan(tree)
+    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    reconstructed_tree = reconstruct_tree(*config_args)
+    reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
+    plan = (
+        f"b0 {c1.short_str}\n"
+        f"b1 {c2.short_str}\n"
+        f"b2 {c3.short_str}\n"
+        f"b3 {c4.short_str}"
+    )
+    assert reconstructed_plan == plan
+    b0 = Delta([c1], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b1 = Delta([c2], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b2 = Delta([c3], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b3 = Delta([c4], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    assert reconstructed_tree == {
+        b0.branch_name: b0,
+        b1.branch_name: b1,
+        b2.branch_name: b2,
+        b3.branch_name: b3,
+    }
 
 
 def test_plan__failed_cherry_pick(
@@ -358,7 +357,8 @@ def test_plan__failed_cherry_pick(
     commit(dict(a="b"), "1")
     commit(dict(a="c"), "2")
     create_branch(LOCAL)
-    result = runner.invoke(plan, ["flat", "-y"])
+    with runner.isolated_filesystem(git_repository):
+        result = runner.invoke(cli_group, ["plan", "flat"])
     assert result.exit_code == 1
     assert (
         "Error: Cherry-pick failed"
@@ -374,7 +374,8 @@ def test_plan__duplicate_commit_names(
     commit(dict(a="b"), "1")
     commit(dict(a="c"), "1")
     create_branch(LOCAL)
-    result = runner.invoke(plan)
+    with runner.isolated_filesystem(git_repository):
+        result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
     assert (
         "Error: Duplicate commit messages found in local commits."
@@ -389,7 +390,8 @@ def test_plan__diverged(
     create_branch(LOCAL)
     commit(dict(a="b"), "1")
     create_branch(UPSTREAM)
-    result = runner.invoke(plan)
+    with runner.isolated_filesystem(git_repository):
+        result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
     assert "Error: Your local and upstream have diverged." in result.output
 
@@ -399,7 +401,8 @@ def test_plan__nonexistent_upstream(
 ):
     commit(dict(a="a"), "0")
     create_branch(LOCAL)
-    result = runner.invoke(plan)
+    with runner.isolated_filesystem(git_repository):
+        result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
     assert f"Error: Upstream {UPSTREAM} does not exist" in result.output
 
@@ -409,7 +412,8 @@ def test_plan__nonexistent_local(
 ):
     commit(dict(a="a"), "0")
     create_branch(UPSTREAM)
-    result = runner.invoke(plan)
+    with runner.isolated_filesystem(git_repository):
+        result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
     assert f"Error: Local {LOCAL} does not exist" in result.output
 
@@ -423,7 +427,8 @@ def test_plan__work_tree_not_clean(
     create_branch(LOCAL)
     with open(git_repository / "a", "w") as f:
         f.write("ab")
-    result = runner.invoke(plan)
+    with runner.isolated_filesystem(git_repository):
+        result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
     assert "Error: Work tree not clean." in result.output
 
@@ -436,30 +441,32 @@ def test_reconstruct_tree_branch_label_first(commit, create_branch):
     commit(dict(b="a"), "3")
     commit(dict(a="bb"), "4")
     create_branch(LOCAL)
-    c1, c2, c3, c4 = get_local_commits()
+    c1, c2, c3, c4 = get_local_commits(LOCAL, UPSTREAM)
     plan = f"""
     b {c1.sha} {c1.short_message}
     b {c2.sha} {c2.short_message}
     b1 {c3.sha} {c3.short_message}
     b2@b {c4.sha} {c4.short_message}
     """
-    tree = parse_plan(plan)
+    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    tree = parse_plan(plan, *config_args)
     write_plan(tree)
-    reconstructed_tree = reconstruct_tree()
-    b = Delta(commits=[c1, c2], target=None)
-    b1 = Delta(commits=[c3], target=None)
-    b2 = Delta(commits=[c4], target=b)
+    reconstructed_tree = reconstruct_tree(*config_args)
+    b = Delta([c1, c2], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b1 = Delta([c3], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b2 = Delta([c4], b, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
     assert reconstructed_tree == {
-        c1.branch_name: b,
-        c3.branch_name: b1,
-        c4.branch_name: b2,
+        c1.get_branch_name(BRANCH_TEMPLATE): b,
+        c3.get_branch_name(BRANCH_TEMPLATE): b1,
+        c4.get_branch_name(BRANCH_TEMPLATE): b2,
     }
 
 
 def test_build_empty_tree(
     commit_b, upstream, commit_a, commit_c, local, git_repository
 ):
-    tree = reconstruct_tree()
+    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    tree = reconstruct_tree(*config_args)
     assert tree == {}
 
 
@@ -468,5 +475,6 @@ def test_empty_tree__git(create_branch, commit, git_repository):
     create_branch(UPSTREAM)
     commit(dict(b="b"), "b")
     create_branch(LOCAL)
-    tree = reconstruct_tree()
+    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    tree = reconstruct_tree(*config_args)
     assert tree == {}

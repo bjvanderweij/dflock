@@ -13,33 +13,12 @@ import click
 from dflock import utils
 
 
-def read_config(config: configparser.ConfigParser):
-    root_path = utils.run("rev-parse", "--show-toplevel").strip()
-    paths = [
-        Path(root_path) / ".dflock",
-        Path("~/.dflock").expanduser(),
-    ]
-    config.read(paths)
-    return config
-
-
-CONFIG = configparser.ConfigParser()
-CONFIG["dflock"] = {
-    "upstream": "origin/main",
-    "local": "main",
-    "remote": "origin",
-    "branch-anchor": "first",  # first/last
-    "branch-template": "feature/{}",
-    "editor": "vim",
-}
-CONFIG = read_config(CONFIG)
-UPSTREAM = CONFIG["dflock"]["upstream"]
-LOCAL = CONFIG["dflock"]["local"]
-BRANCH_TEMPLATE = CONFIG["dflock"]["branch-template"]
-EDITOR = CONFIG["dflock"]["editor"]
-BRANCH_ANCHOR = CONFIG["dflock"]["branch-anchor"]
-REMOTE = CONFIG["dflock"]["remote"]
-
+DEFAULT_UPSTREAM = "main"
+DEFAULT_LOCAL = "main"
+DEFAULT_REMOTE = "origin"
+DEFAULT_BRANCH_ANCHOR = "first"  # first/last
+DEFAULT_BRANCH_TEMPLATE = "{}"
+DEFAULT_EDITOR = "nano"
 
 INSTRUCTIONS = """
 
@@ -62,37 +41,57 @@ INSTRUCTIONS = """
 
 def on_local(f):
     @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        if utils.get_current_branch() != LOCAL:
-            raise click.ClickException(f"You must be on your the local branch: {LOCAL}")
-        return f(*args, **kwargs)
+    def wrapper(ctx, *args, **kwargs):
+        local = ctx.obj["config"]["local"]
+        if utils.get_current_branch() != local:
+            raise click.ClickException(
+                f"You must be on your the local branch: {local}"
+            )
+        return f(ctx, *args, **kwargs)
 
     return wrapper
 
 
 def no_hot_branch(f) -> typing.Callable:
     @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        if utils.get_current_branch() in _get_hot_branches():
+    def wrapper(ctx, *args, **kwargs):
+        local = ctx.obj["config"]["local"]
+        upstream = get_upstream_name(
+            ctx.obj["config"]["upstream"],
+            ctx.obj["config"]["remote"],
+        )
+        branch_template = ctx.obj["config"]["branch-template"]
+        if utils.get_current_branch() in _get_hot_branches(
+            local, upstream, branch_template
+        ):
             raise click.ClickException(
                 "please switch to a branch not managed by dflock before "
                 "continuing"
             )
-        return f(*args, **kwargs)
+        return f(ctx, *args, **kwargs)
 
     return wrapper
 
 
 def undiverged(f):
     @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        if utils.have_diverged(UPSTREAM, LOCAL):
+    def wrapper(ctx, *args, **kwargs):
+        local = ctx.obj["config"]["local"]
+        upstream = get_upstream_name(
+            ctx.obj["config"]["upstream"],
+            ctx.obj["config"]["remote"],
+        )
+        remote = ctx.obj["config"]["remote"]
+        if utils.have_diverged(upstream, local):
             click.echo(
-                f"Hint: Use `git pull --rebase {UPSTREAM}` to pull "
+                "Hint: Use `dfl pull` or "
+                f"`git pull --rebase {remote} {upstream}` to pull "
                 "upstream changes into your local branch."
             )
-            raise click.ClickException("Your local and upstream have diverged.")
-        return f(*args, **kwargs)
+            raise click.ClickException(
+                "Your local and upstream have diverged."
+            )
+        return f(ctx, *args, **kwargs)
 
     return wrapper
 
@@ -131,6 +130,10 @@ class CherryPickFailed(DflockException):
     pass
 
 
+class NoRemoteTrackingBranch(DflockException):
+    pass
+
+
 class Commit(typing.NamedTuple):
     sha: str
     message: str
@@ -149,24 +152,26 @@ class Commit(typing.NamedTuple):
     def short_str(self):
         return f"{self.sha[:8]} {self.short_message}"
 
-    @property
-    def branch_name(self):
+    def get_branch_name(self, branch_template) -> str:
         uniqueish = md5(self.message.encode()).hexdigest()[:8]
         words = re.findall(r"\w+", self.message.lower())
         readable = '-'.join(words)
-        return BRANCH_TEMPLATE.format(f"{readable}-{uniqueish}")
+        return branch_template.format(f"{readable}-{uniqueish}")
 
 
 class Delta(typing.NamedTuple):
     commits: list[Commit]
     target: typing.Optional["Delta"]
+    branch_anchor: str
+    upstream: str
+    branch_template: str
 
     @property
-    def branch_name(self):
-        if BRANCH_ANCHOR == "first":
-            return self.commits[0].branch_name
+    def branch_name(self) -> str:
+        if self.branch_anchor == "first":
+            return self.commits[0].get_branch_name(self.branch_template)
         else:
-            return self.commits[-1].branch_name
+            return self.commits[-1].get_branch_name(self.branch_template)
 
     @property
     def full_branch_name(self) -> str:
@@ -175,7 +180,7 @@ class Delta(typing.NamedTuple):
     @property
     def target_branch_name(self) -> str:
         if self.target is None:
-            return UPSTREAM
+            return self.upstream
         else:
             return self.target.branch_name
 
@@ -249,38 +254,63 @@ def resolve_delta(name: str, branches: list[str]) -> str:
     raise ValueError(f"Could not match {name} to a unique branch")
 
 
-def get_delta_branches() -> list[str]:
+def get_delta_branches(local, upstream, branch_template) -> list[str]:
     branches = utils.get_local_branches()
-    commits = get_local_commits()
-    return [c.branch_name for c in commits if c.branch_name in branches]
+    commits = get_local_commits(local, upstream)
+    return [
+        c.get_branch_name(branch_template) for c in commits
+        if c.get_branch_name(branch_template) in branches
+    ]
 
 
-def build_tree(stack: bool = True) -> dict[str, Delta]:
+def build_tree(
+    local: str,
+    upstream: str,
+    branch_anchor: str,
+    branch_template: str,
+    stack: bool = True
+) -> dict[str, Delta]:
     """Create a simple plan including all local commits.
 
     If stack is False, treat every commit as an independent delta, otherwise
     create a stack of deltas.
     """
-    commits = get_local_commits()
+    commits = get_local_commits(local, upstream)
     tree: dict[str, Delta] = {}
     target = None
     for commit in commits:
-        delta = Delta([commit], target)
+        delta = Delta(
+            [commit], target, branch_anchor, upstream, branch_template
+        )
         tree[delta.branch_name] = delta
         if stack:
             target = delta
     return tree
 
 
-def infer_delta_last_commit(commit, i, commits_by_message, tree, root) -> Delta:
-    candidate_commits = get_last_n_commits(commit.branch_name, i + 1)
-    if candidate_commits[-1].branch_name != commit.branch_name:
+def infer_delta_last_commit(
+    commit: Commit,
+    i: int,
+    commits_by_message,
+    tree: dict[str, Delta],
+    root: Commit,
+    upstream: str,
+    branch_anchor: str,
+    branch_template: str,
+) -> Delta:
+    candidate_commits = get_last_n_commits(
+        commit.get_branch_name(branch_template), i + 1
+    )
+    if (
+        candidate_commits[-1].get_branch_name(branch_template)
+        != commit.get_branch_name(branch_template)
+    ):
         raise click.ClickException(
             "Invalid state: dflock-managed branch name "
-            f"{commit.branch_name} does not match branch name "
-            "expected based on its last commit.\n\nRun\n\ngit branch "
-            "-D {commit.branch_name}\n\nto remove the offending "
-            "branch. Or run\n\ndfl reset\n\nif you'd like to start "
+            f"{commit.get_branch_name(branch_template)} does not match branch "
+            "name expected based on its last commit.\n\nRun\n\ngit branch "
+            "-D {commit.branch_name(branch_template)}\n\nto remove the "
+            "offending branch. Or run\n\ndfl reset\n\nif you'd like to start "
             "with a clean slate."
         )
     target = None
@@ -288,12 +318,15 @@ def infer_delta_last_commit(commit, i, commits_by_message, tree, root) -> Delta:
     # Find the first commit of the branch by iterating through
     # preceding commits in reverse order
     for cc in reversed(candidate_commits):
-        branch_name = cc.branch_name
+        branch_name = cc.get_branch_name(branch_template)
         # When finding a commit whose branch name corresponds to
         # a branch in the tree and it isn't the current commits branch
         # name assume we've found the target branch and stop
-        if branch_name in tree and branch_name != commit.branch_name:
-            target = tree[cc.branch_name]
+        if (
+            branch_name in tree
+            and (branch_name != commit.get_branch_name(branch_template))
+        ):
+            target = tree[cc.get_branch_name(branch_template)]
             break
         # if we find a commit that is in the commits by message
         elif cc.message in commits_by_message:
@@ -311,16 +344,29 @@ def infer_delta_last_commit(commit, i, commits_by_message, tree, root) -> Delta:
                     + cc.short_message
                 )
             break
-    return Delta(commits, target)
+    return Delta(commits, target, branch_anchor, upstream, branch_template)
 
 
-def infer_delta_first_commit(commit, i, commits_by_message, tree, root) -> Delta:
+def infer_delta_first_commit(
+    commit: Commit,
+    i: int,
+    commits_by_message: dict[str, Commit],
+    tree: dict[str, Delta],
+    root: Commit,
+    upstream: str,
+    branch_anchor: str,
+    branch_template: str,
+) -> Delta:
     n_local = len(commits_by_message)
-    candidate_commits = get_last_n_commits(commit.branch_name, n_local - i + 1)
+    candidate_commits = get_last_n_commits(
+        commit.get_branch_name(branch_template), n_local - i + 1
+    )
     target = None
     branch_commits: list[Commit] = []
-    start_index = [c.branch_name for c in candidate_commits].index(
-        commit.branch_name
+    start_index = [
+        c.get_branch_name(branch_template) for c in candidate_commits
+    ].index(
+        commit.get_branch_name(branch_template)
     )
     for delta in tree.values():
         if (
@@ -337,10 +383,17 @@ def infer_delta_first_commit(commit, i, commits_by_message, tree, root) -> Delta
                 f"warning: unknown commit message encountered: {cc.message}"
             )
             break
-    return Delta(branch_commits, target)
+    return Delta(
+        branch_commits, target, branch_anchor, upstream, branch_template
+    )
 
 
-def reconstruct_tree() -> dict[str, Delta]:
+def reconstruct_tree(
+    local: str,
+    upstream: str,
+    branch_anchor: str,
+    branch_template: str
+) -> dict[str, Delta]:
     """Use local commits to reconstruct the plan.
 
     Assumes that the commits in local branches have the same commit messages
@@ -370,23 +423,41 @@ def reconstruct_tree() -> dict[str, Delta]:
         If not, preceding commit must be
     record the final commit in the branch
     """
-    commits = get_local_commits()
+    commits = get_local_commits(local, upstream)
     commits_by_message = {c.message: c for c in commits}
     local_branches = utils.get_local_branches()
-    root = get_last_upstream_commit()
+    root = get_last_upstream_commit(upstream)
     tree: dict[str, Delta] = {}
     for i, commit in enumerate(commits):
-        if commit.branch_name in local_branches:
-            if BRANCH_ANCHOR == "first":
-                delta = infer_delta_first_commit(commit, i, commits_by_message, tree, root)
+        if commit.get_branch_name(branch_template) in local_branches:
+            if branch_anchor == "first":
+                delta = infer_delta_first_commit(
+                    commit,
+                    i,
+                    commits_by_message,
+                    tree,
+                    root,
+                    upstream,
+                    branch_anchor,
+                    branch_template,
+                )
             else:
-                delta = infer_delta_last_commit(commit, i, commits_by_message, tree, root)
+                delta = infer_delta_last_commit(
+                    commit,
+                    i,
+                    commits_by_message,
+                    tree,
+                    root,
+                    upstream,
+                    branch_anchor,
+                    branch_template,
+                )
             tree[delta.branch_name] = delta
     return tree
 
 
-def get_last_upstream_commit() -> Commit:
-    return get_commits(UPSTREAM)[0]
+def get_last_upstream_commit(upstream) -> Commit:
+    return get_commits(upstream)[0]
 
 
 def write_plan(tree: dict[str, Delta]):
@@ -468,10 +539,12 @@ def _tokenize_plan(plan: str) -> typing.Iterable[_BranchCommand]:
 
 def _make_commit_lists(
     branch_commands: typing.Iterable[_BranchCommand],
+    local: str,
+    upstream: str,
 ) -> list[_CommitList]:
     """Build lists of contiguous commits belonging to a branch."""
     branches: list[_CommitList] = []
-    local_commits = iter(get_local_commits())
+    local_commits = iter(get_local_commits(local, upstream))
     for bc in branch_commands:
         if len(branches) == 0 or bc.label != branches[-1].label:
             branches.append(_CommitList(bc.label, None, []))
@@ -495,6 +568,10 @@ def _make_commit_lists(
 
 def _build_tree(
     candidate_deltas: typing.Iterable[_CommitList],
+    local: str,
+    upstream: str,
+    branch_anchor: str,
+    branch_template: str,
 ) -> dict[str, Delta]:
     """Parse branching plan and return a branch DAG.
 
@@ -512,7 +589,7 @@ def _build_tree(
         if d.target_label not in valid_target_labels:
             hints = [
                 "re-order commits with "
-                f"`git rebase --interactive {LOCAL} {UPSTREAM}`"
+                f"`git rebase --interactive {local} {upstream}`"
             ]
             raise PlanError(
                 f"invalid target for \"{d.label}\": \"{d.target_label}\"",
@@ -525,19 +602,36 @@ def _build_tree(
             last_target_label = d.target_label
             valid_target_labels = {last_target_label}
         valid_target_labels.add(d.label)
-        deltas[d.label] = Delta(d.commits, target_branch)
+        deltas[d.label] = Delta(
+            d.commits, target_branch, branch_anchor, upstream, branch_template
+
+        )
     return {b.branch_name: b for b in deltas.values()}
 
 
-def parse_plan(plan: str) -> dict[str, Delta]:
+def parse_plan(
+    plan: str,
+    local: str,
+    upstream: str,
+    branch_anchor: str,
+    branch_template: str
+) -> dict[str, Delta]:
     tokens = _tokenize_plan(plan)
-    commit_lists = _make_commit_lists(tokens)
-    return _build_tree(commit_lists)
+    commit_lists = _make_commit_lists(tokens, local, upstream)
+    return _build_tree(
+        commit_lists,
+        local,
+        upstream,
+        branch_anchor,
+        branch_template
+    )
 
 
-def render_plan(tree: dict[str, Delta]) -> str:
-    local_commits = get_local_commits()
-    sorted_deltas = list(sorted(tree.values(), key=lambda d: local_commits.index(d.commits[0])))
+def render_plan(tree: dict[str, Delta], local: str, upstream: str) -> str:
+    local_commits = get_local_commits(local, upstream)
+    sorted_deltas = list(
+        sorted(tree.values(), key=lambda d: local_commits.index(d.commits[0]))
+    )
     lines = []
     for commit in local_commits:
         command = "s"
@@ -558,27 +652,36 @@ def render_plan(tree: dict[str, Delta]) -> str:
     return "\n".join(lines)
 
 
-def _get_hot_branches() -> set[str]:
-    commits = get_local_commits()
+def _get_hot_branches(local, upstream, branch_template) -> set[str]:
+    commits = get_local_commits(local, upstream)
     local_branches = utils.get_local_branches()
-    return set(local_branches) & set(c.branch_name for c in commits)
+    return (
+        set(local_branches)
+        & set(c.get_branch_name(branch_template) for c in commits)
+    )
 
 
-def prune_local_branches(tree):
-    hot_branches = _get_hot_branches()
+def prune_local_branches(tree, local, upstream, branch_template) -> None:
+    hot_branches = _get_hot_branches(local, upstream, branch_template)
     branches_to_prune = hot_branches - set(tree.keys())
     for branch_name in branches_to_prune:
         click.echo(f"pruning {branch_name}")
         utils.run("branch", "-D", branch_name)
 
 
-def get_remote_tracking_branch(branch):
-    return utils.run("for-each-ref", "--format=%(upstream:short)", f"refs/heads/{branch}").strip()
+def get_remote_tracking_branch(branch) -> str:
+    return utils.run(
+        "for-each-ref", "--format=%(upstream:short)", f"refs/heads/{branch}"
+    ).strip()
 
 
 def branch_up_to_date(branch):
     remote_tracking_branch = get_remote_tracking_branch(branch)
-    return utils.run("rev-parse", remote_tracking_branch) == utils.run("rev-parse", branch)
+    if remote_tracking_branch == "":
+        raise NoRemoteTrackingBranch()
+    return utils.run(
+        "rev-parse", remote_tracking_branch
+    ) == utils.run("rev-parse", branch)
 
 
 def get_commits_between(rev_a, rev_b) -> list[Commit]:
@@ -606,13 +709,13 @@ def get_last_n_commits(rev, n) -> list[Commit]:
     return get_commits(rev, number=n)
 
 
-def get_local_commits() -> list[Commit]:
+def get_local_commits(local, upstream) -> list[Commit]:
     """Return all commits between upstream and local."""
-    if not utils.object_exists(UPSTREAM):
-        raise click.ClickException(f"Upstream {UPSTREAM} does not exist")
-    if not utils.object_exists(LOCAL):
-        raise click.ClickException(f"Local {LOCAL} does not exist")
-    commits = get_commits_between(UPSTREAM, LOCAL)
+    if not utils.object_exists(upstream):
+        raise click.ClickException(f"Upstream {upstream} does not exist")
+    if not utils.object_exists(local):
+        raise click.ClickException(f"Local {local} does not exist")
+    commits = get_commits_between(upstream, local)
     if len(commits) != len(set(c.message for c in commits)):
         raise click.ClickException(
             "Duplicate commit messages found in local commits."
@@ -620,18 +723,62 @@ def get_local_commits() -> list[Commit]:
     return commits
 
 
-def edit_interactively(contents: str) -> str:
+def edit_interactively(contents: str, editor: str) -> str:
     with tempfile.NamedTemporaryFile("w") as text_file:
         text_file.write(contents)
         text_file.seek(0)
-        subprocess.run([EDITOR, text_file.name])
+        subprocess.run([editor, text_file.name])
         with open(text_file.name, "r") as text_file_read:
             return text_file_read.read()
 
 
+def read_config(ctx, cmd, path):
+    config = configparser.ConfigParser()
+    config["dflock"] = {
+        "upstream": DEFAULT_UPSTREAM,
+        "local": DEFAULT_LOCAL,
+        "remote": DEFAULT_REMOTE,
+        "branch-anchor": DEFAULT_BRANCH_ANCHOR,
+        "branch-template": DEFAULT_BRANCH_TEMPLATE,
+        "editor": DEFAULT_EDITOR,
+    }
+    paths = []
+    if path is not None:
+        paths = [path]
+    else:
+        if is_inside_work_tree():
+            root_path = Path(utils.run("rev-parse", "--show-toplevel").strip())
+            paths = [root_path / ".dflock"]
+        paths.append(Path("~/.dflock").expanduser())
+    config.read(paths)
+    return config
+
+
+def get_upstream_name(upstream: str, remote: str | None) -> str:
+    if remote == "":
+        return upstream
+    return f"{remote}/{upstream}"
+
+
 @click.group()
-def cli_group():
-    pass
+@click.option(
+    "-c",
+    "--config",
+    callback=read_config,
+    type=click.Path(
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        allow_dash=False,
+        path_type=str,
+    ),
+    help="Use a custom config file."
+)
+@click.pass_context
+def cli_group(ctx, config):
+    ctx.ensure_object(dict)
+    ctx.obj["config"] = config["dflock"]
 
 
 def cli():
@@ -647,12 +794,6 @@ def cli():
 @click.argument(
     "delta-references",
     nargs=-1,
-    type=str,
-)
-@click.option(
-    "-r",
-    "--remote",
-    default=REMOTE,
     type=str,
 )
 @click.option(
@@ -676,9 +817,26 @@ def cli():
     type=bool,
     help="Use Gitlab-specific push-options to create a merge request",
 )
-def push(delta_references, remote, write, interactive, gitlab_merge_request):
+@click.pass_context
+def push(
+    ctx,
+    delta_references,
+    write,
+    interactive,
+    gitlab_merge_request
+) -> None:
     """Push deltas to the remote."""
-    tree = reconstruct_tree()
+    remote = ctx.obj["config"]["remote"]
+    if remote == "":
+        raise click.ClickException("Remote must be set.")
+    local = ctx.obj["config"]["local"]
+    upstream = get_upstream_name(
+        ctx.obj["config"]["upstream"],
+        ctx.obj["config"]["remote"],
+    )
+    branch_anchor = ctx.obj["config"]["branch-anchor"]
+    branch_template = ctx.obj["config"]["branch-template"]
+    tree = reconstruct_tree(local, upstream, branch_anchor, branch_template)
     if write:
         try:
             with utils.return_to_head():
@@ -729,9 +887,11 @@ def push(delta_references, remote, write, interactive, gitlab_merge_request):
     type=bool,
     help="Only show the plan without executing it.",
 )
-@no_hot_branch
+@click.pass_context
 @clean_work_tree
-def plan(strategy, edit, show):
+@no_hot_branch
+@undiverged
+def plan(ctx, strategy, edit, show) -> None:
     """Create a plan and update local branches.
 
     The optional argument specifies the type of plan to generate. Available
@@ -745,19 +905,33 @@ def plan(strategy, edit, show):
     empty: generate an empty plan
 
     """
+    local = ctx.obj["config"]["local"]
+    upstream = get_upstream_name(
+        ctx.obj["config"]["upstream"],
+        ctx.obj["config"]["remote"],
+    )
+    branch_anchor = ctx.obj["config"]["branch-anchor"]
+    branch_template = ctx.obj["config"]["branch-template"]
+    editor = ctx.obj["config"]["editor"]
     if strategy == "stack":
-        tree = build_tree(stack=True)
+        tree = build_tree(
+            local, upstream, branch_anchor, branch_template, stack=True
+        )
     elif strategy == "flat":
-        tree = build_tree(stack=False)
+        tree = build_tree(
+            local, upstream, branch_anchor, branch_template, stack=False
+        )
     elif strategy == "empty":
         tree = {}
     elif strategy == "detect":
-        tree = reconstruct_tree()
+        tree = reconstruct_tree(
+            local, upstream, branch_anchor, branch_template
+        )
     else:
         raise ValueError("This shouldn't happen")
-    plan = render_plan(tree)
+    plan = render_plan(tree, local, upstream)
     if (edit or strategy == "detect") and not show:
-        new_plan = edit_interactively(plan + INSTRUCTIONS)
+        new_plan = edit_interactively(plan + INSTRUCTIONS, editor)
         new_plan = "\n".join(iterate_plan(new_plan))
         if not new_plan.strip():
             click.echo("Aborting.")
@@ -767,13 +941,15 @@ def plan(strategy, edit, show):
     click.echo(f"{new_plan}\n")
     if not show:
         try:
-            tree = parse_plan(new_plan)
+            tree = parse_plan(
+                new_plan, local, upstream, branch_anchor, branch_template
+            )
             with utils.return_to_head():
                 write_plan(tree)
             click.echo(
                 "Branches updated. Run `dfl push` to push them to a remote."
             )
-            prune_local_branches(tree)
+            prune_local_branches(tree, local, upstream, branch_template)
         except ParsingError as exc:
             raise click.ClickException(str(exc))
         except (PlanError, CherryPickFailed) as exc:
@@ -782,60 +958,110 @@ def plan(strategy, edit, show):
 
 
 @cli_group.command()
+@click.option(
+    "-t",
+    "--show-targets",
+    is_flag=True,
+    type=bool,
+    help="Print target of each branch",
+)
 @inside_work_tree
 @click.pass_context
-def status(ctx):
-    diverged = utils.have_diverged(UPSTREAM, LOCAL)
-    branches = get_delta_branches()
-    on_local = utils.get_current_branch() == LOCAL
+def status(ctx, show_targets) -> None:
+    """Show status of delta branches."""
+    local = ctx.obj["config"]["local"]
+    upstream = get_upstream_name(
+        ctx.obj["config"]["upstream"],
+        ctx.obj["config"]["remote"],
+    )
+    branch_template = ctx.obj["config"]["branch-template"]
+    diverged = utils.have_diverged(upstream, local)
+    branches = get_delta_branches(local, upstream, branch_template)
+    on_local = utils.get_current_branch() == local
     if on_local:
         click.echo("On local branch.")
     else:
         click.echo("NOT on local branch.")
     if diverged:
         click.echo("Local and upstream have diverged")
-    click.echo("\nDeltas:")
-    for branch in branches:
-        up_to_date = branch_up_to_date(branch)
-        click.echo(f"\t{branch}{'' if up_to_date else ' (diverged from remote)'}")
+    if len(branches) > 0:
+        if show_targets:
+            branch_anchor = ctx.obj["config"]["branch-anchor"]
+            tree = reconstruct_tree(
+                local, upstream, branch_anchor, branch_template
+            )
+        click.echo("\nDeltas:")
+        for i, branch in enumerate(branches):
+            try:
+                up_to_date = branch_up_to_date(branch)
+                click.echo(
+                    f"{'b' + str(i):>4}: "
+                    f"{branch}{'' if up_to_date else ' (diverged)'}"
+                )
+            except NoRemoteTrackingBranch:
+                click.echo(
+                    f"{'b' + str(i):>4}: {branch} (not pushed)"
+                )
+            if show_targets:
+                target = tree[branch].target_branch_name
+                click.echo(f"{' ' * 6}@ {target}")
 
 
 @cli_group.command()
 @inside_work_tree
+@clean_work_tree
+@click.pass_context
 @undiverged
 @on_local
-@clean_work_tree
-def remix():
+def remix(ctx) -> None:
     """Alias for `git rebase -i <upstream>`.
 
     Only works when on local.
     """
-    subprocess.run(f"git rebase -i \"{UPSTREAM}\"", shell=True)
+    upstream = get_upstream_name(
+        ctx.obj["config"]["upstream"],
+        ctx.obj["config"]["remote"],
+    )
+    subprocess.run(f"git rebase -i {upstream}", shell=True)
 
 
 @cli_group.command()
 @inside_work_tree
+@click.pass_context
 @on_local
-@clean_work_tree
-def pull():
+def pull(ctx) -> None:
     """Alias for `git pull --rebase <upstream>`.
 
     Only works when on local.
     """
-    subprocess.run(f"git pull --rebase \"{UPSTREAM}\"", shell=True)
+    upstream = ctx.obj["config"]["upstream"]
+    remote = ctx.obj["config"]["remote"]
+    if remote == "":
+        raise click.ClickException("Remote must be set.")
+    subprocess.run(f"git pull --rebase {remote} {upstream}", shell=True)
 
 
 @cli_group.command()
 @inside_work_tree
-def log():
+@click.pass_context
+@undiverged
+def log(ctx) -> None:
     """Alias for `git log <local> ^<upstream>`."""
-    subprocess.run(f"git log \"{LOCAL}\" \"^{UPSTREAM}\"", shell=True)
+    local = ctx.obj["config"]["local"]
+    if utils.get_current_branch() != local:
+        click.echo("Warning: not on local branch.")
+    upstream = get_upstream_name(
+        ctx.obj["config"]["upstream"],
+        ctx.obj["config"]["remote"],
+    )
+    subprocess.run(f"git log {local} ^{upstream}", shell=True)
 
 
 @cli_group.command()
 @inside_work_tree
 @click.argument("delta-reference", type=str)
-def checkout(delta_reference):
+@click.pass_context
+def checkout(ctx, delta_reference) -> None:
     """Checkout deltas or the local branch.
 
     If DELTA_REFERENCE is "local" or the name of your local branch, checkout
@@ -846,10 +1072,16 @@ def checkout(delta_reference):
 
     Otherwise, try to do a partial match against your delta branch names.
     This only works if there is a unique match."""
-    if delta_reference in ["local", LOCAL]:
-        branch = LOCAL
+    local = ctx.obj["config"]["local"]
+    upstream = get_upstream_name(
+        ctx.obj["config"]["upstream"],
+        ctx.obj["config"]["remote"],
+    )
+    branch_template = ctx.obj["config"]["branch-template"]
+    if delta_reference in ["local", local]:
+        branch = local
     else:
-        branches = get_delta_branches()
+        branches = get_delta_branches(local, upstream, branch_template)
         try:
             branch = resolve_delta(delta_reference, branches)
         except ValueError as exc:
@@ -859,56 +1091,27 @@ def checkout(delta_reference):
 
 @cli_group.command()
 @inside_work_tree
-@no_hot_branch
 @clean_work_tree
-def write():
+@click.pass_context
+@no_hot_branch
+@undiverged
+def write(ctx) -> None:
     """Update deltas based on the current plan."""
-    tree = reconstruct_tree()
+    local = ctx.obj["config"]["local"]
+    upstream = get_upstream_name(
+        ctx.obj["config"]["upstream"],
+        ctx.obj["config"]["remote"],
+    )
+    branch_anchor = ctx.obj["config"]["branch-anchor"]
+    branch_template = ctx.obj["config"]["branch-template"]
+    tree = reconstruct_tree(local, upstream, branch_anchor, branch_template)
     try:
         with utils.return_to_head():
             write_plan(tree)
     except CherryPickFailed as exc:
         exc.emit_hints()
         raise click.ClickException(str(exc))
-
-
-@cli_group.command()
-@click.option(
-    "-c",
-    "--commits",
-    is_flag=True,
-    type=bool,
-    help="Print commits in each branch",
-)
-@click.option(
-    "-t",
-    "--show-targets",
-    is_flag=True,
-    type=bool,
-    help="Print target of each branch",
-)
-def delta_branches(commits: bool, show_targets: bool):
-    """List delta branches.
-
-    For all commits between upstream and local, find delta branches with a
-    branch name derived from that commit.
-    """
-    branches = get_delta_branches()
-    if show_targets or commits:
-        tree = reconstruct_tree()
-    for branch_name in reversed(branches):
-        if show_targets:
-            delta = tree[branch_name]
-            target = UPSTREAM
-            if delta.target is not None:
-                target = delta.target_branch_name
-            click.echo(f"{branch_name} --> {target}")
-        else:
-            click.echo(branch_name)
-        if commits:
-            delta = tree[branch_name]
-            for commit in reversed(delta.commits):
-                click.echo(f"\t{commit.sha[:8]} {commit.message}")
+    click.echo("Delta branches updated.")
 
 
 @cli_group.command()
@@ -918,11 +1121,19 @@ def delta_branches(commits: bool, show_targets: bool):
     is_flag=True,
     help="Do not ask for confirmation."
 )
-def reset(yes):
+@click.pass_context
+def reset(ctx, yes) -> None:
     """Reset the plan.
 
-    This removes all dflock-managed branches."""
-    branches = get_delta_branches()
+    This removes all dflock-managed branches.
+    """
+    local = ctx.obj["config"]["local"]
+    upstream = get_upstream_name(
+        ctx.obj["config"]["upstream"],
+        ctx.obj["config"]["remote"],
+    )
+    branch_template = ctx.obj["config"]["branch-template"]
+    branches = get_delta_branches(local, upstream, branch_template)
     if len(branches) == 0:
         click.echo("No active branches found")
         return

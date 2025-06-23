@@ -108,18 +108,6 @@ def clean_work_tree(f):
     return wrapper
 
 
-def local_and_upstream_exist(f):
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        if not utils.object_exists(UPSTREAM):
-            raise click.ClickException(f"Upstream {UPSTREAM} does not exist")
-        if not utils.object_exists(LOCAL):
-            raise click.ClickException(f"Local {LOCAL} does not exist")
-        return f(*args, **kwargs)
-
-    return wrapper
-
-
 class DflockException(Exception):
     def __init__(self, *args, hints: None | list[str] = None, **kwargs):
         self.hints = hints
@@ -618,10 +606,12 @@ def get_last_n_commits(rev, n) -> list[Commit]:
     return get_commits(rev, number=n)
 
 
-@local_and_upstream_exist
-@undiverged
 def get_local_commits() -> list[Commit]:
     """Return all commits between upstream and local."""
+    if not utils.object_exists(UPSTREAM):
+        raise click.ClickException(f"Upstream {UPSTREAM} does not exist")
+    if not utils.object_exists(LOCAL):
+        raise click.ClickException(f"Local {LOCAL} does not exist")
     commits = get_commits_between(UPSTREAM, LOCAL)
     if len(commits) != len(set(c.message for c in commits)):
         raise click.ClickException(

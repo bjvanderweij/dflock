@@ -7,7 +7,7 @@ import pytest
 from dflock import utils
 from dflock.main import (
     cli_group, Delta, Commit, parse_plan, ParsingError, PlanError,
-    reconstruct_tree, write_plan, get_local_commits, render_plan,
+    write_plan, get_local_commits, render_plan,
     read_config, App
 )
 
@@ -241,7 +241,7 @@ def dag_commits(commit, create_branch):
 
 
 @pytest.mark.parametrize("anchor_commit", ["first", "last"])
-def test_reconstruct_tree__anchor_commit(anchor_commit, dag_commits):
+def test_reconstruct_tree__anchor_commit(app, anchor_commit, dag_commits):
     c1, c2, c3, c4 = dag_commits
     plan = (
         f"b0 {c1.short_str}\n"
@@ -250,9 +250,10 @@ def test_reconstruct_tree__anchor_commit(anchor_commit, dag_commits):
         f"b2@b0 {c4.short_str}"
     )
     config_args = [LOCAL, UPSTREAM, anchor_commit, BRANCH_TEMPLATE]
+    app.anchor_commit = anchor_commit
     tree = parse_plan(plan, *config_args)
     write_plan(tree)
-    reconstructed_tree = reconstruct_tree(*config_args)
+    reconstructed_tree = app.reconstruct_tree()
     b = Delta([c1, c2], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
     b1 = Delta([c3], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
     b2 = Delta([c4], b, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
@@ -271,7 +272,7 @@ def test_reconstruct_tree__anchor_commit(anchor_commit, dag_commits):
 
 
 @pytest.mark.parametrize("anchor_commit", ["first", "last"])
-def test_reconstruct_tree(dag_commits, anchor_commit):
+def test_reconstruct_tree(app, dag_commits, anchor_commit):
     c1, c2, c3, c4 = dag_commits
     plan = (
         f"b0 {c1.short_str}\n"
@@ -282,8 +283,7 @@ def test_reconstruct_tree(dag_commits, anchor_commit):
     config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     tree = parse_plan(plan, *config_args)
     write_plan(tree)
-    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
-    reconstructed_tree = reconstruct_tree(*config_args)
+    reconstructed_tree = app.reconstruct_tree()
     reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
     assert reconstructed_plan == plan
     b0 = Delta([c1, c2], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
@@ -301,8 +301,7 @@ def test_reconstruct_tree_stacked(app, serially_dependent_commits, anchor_commit
     c1, c2, c3, c4 = serially_dependent_commits
     tree = app.build_tree(stack=True)
     write_plan(tree)
-    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
-    reconstructed_tree = reconstruct_tree(*config_args)
+    reconstructed_tree = app.reconstruct_tree()
     reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
     plan = (
         f"b0 {c1.short_str}\n"
@@ -339,8 +338,7 @@ def test_reconstruct_tree_independent(app, independent_commits, anchor_commit):
     app.anchor_commit = anchor_commit
     tree = app.build_tree(stack=False)
     write_plan(tree)
-    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
-    reconstructed_tree = reconstruct_tree(*config_args)
+    reconstructed_tree = app.reconstruct_tree()
     reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
     plan = (
         f"b0 {c1.short_str}\n"
@@ -349,10 +347,10 @@ def test_reconstruct_tree_independent(app, independent_commits, anchor_commit):
         f"b3 {c4.short_str}"
     )
     assert reconstructed_plan == plan
-    b0 = Delta([c1], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
-    b1 = Delta([c2], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
-    b2 = Delta([c3], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
-    b3 = Delta([c4], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b0 = Delta([c1], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
+    b1 = Delta([c2], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
+    b2 = Delta([c3], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
+    b3 = Delta([c4], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
     assert reconstructed_tree == {
         b0.branch_name: b0,
         b1.branch_name: b1,
@@ -445,7 +443,7 @@ def test_plan__work_tree_not_clean(
     assert "Error: Work tree not clean." in result.output
 
 
-def test_reconstruct_tree_branch_label_first(commit, create_branch):
+def test_reconstruct_tree_branch_label_first(app, commit, create_branch):
     commit(dict(a="a"), "0")
     create_branch(UPSTREAM)
     commit(dict(a="aa"), "1")
@@ -463,7 +461,7 @@ def test_reconstruct_tree_branch_label_first(commit, create_branch):
     config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     tree = parse_plan(plan, *config_args)
     write_plan(tree)
-    reconstructed_tree = reconstruct_tree(*config_args)
+    reconstructed_tree = app.reconstruct_tree()
     b = Delta([c1, c2], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
     b1 = Delta([c3], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
     b2 = Delta([c4], b, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
@@ -475,18 +473,16 @@ def test_reconstruct_tree_branch_label_first(commit, create_branch):
 
 
 def test_build_empty_tree(
-    commit_b, upstream, commit_a, commit_c, local, git_repository
+    app, commit_b, upstream, commit_a, commit_c, local, git_repository
 ):
-    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
-    tree = reconstruct_tree(*config_args)
+    tree = app.reconstruct_tree()
     assert tree == {}
 
 
-def test_empty_tree__git(create_branch, commit, git_repository):
+def test_empty_tree__git(app, create_branch, commit, git_repository):
     commit(dict(a="a"), "a")
     create_branch(UPSTREAM)
     commit(dict(b="b"), "b")
     create_branch(LOCAL)
-    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
-    tree = reconstruct_tree(*config_args)
+    tree = app.reconstruct_tree()
     assert tree == {}

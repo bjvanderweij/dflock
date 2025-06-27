@@ -78,8 +78,7 @@ def no_hot_branch(f) -> typing.Callable:
 def undiverged(f):
     @functools.wraps(f)
     def wrapper(app, *args, **kwargs):
-        upstream = get_upstream_name(app.upstream, app.remote)
-        if utils.have_diverged(upstream, app.local):
+        if utils.have_diverged(app.upstream_name, app.local):
             click.echo(
                 "Hint: Use `dfl pull` or "
                 f"`git pull --rebase {app.remote} {app.upstream}` to pull "
@@ -744,12 +743,6 @@ def read_config(ctx, cmd, path):
         paths.append(Path("~/.dflock").expanduser())
     config.read(paths)
     return config
-
-
-def get_upstream_name(upstream: str, remote: str | None) -> str:
-    if remote == "":
-        return upstream
-    return f"{remote}/{upstream}"
 
 
 @click.group()

@@ -170,6 +170,28 @@ class App:
             return self.upstream
         return f"{self.remote}/{self.upstream}"
 
+    def build_tree(self, stack: bool = True) -> dict[str, "Delta"]:
+        """Create a simple plan including all local commits.
+
+        If stack is False, treat every commit as an independent delta,
+        otherwise create a stack of deltas.
+        """
+        commits = get_local_commits(self.local, self.upstream)
+        tree: dict[str, Delta] = {}
+        target = None
+        for commit in commits:
+            delta = Delta(
+                [commit],
+                target,
+                self.anchor_commit,
+                self.upstream,
+                self.branch_template
+            )
+            tree[delta.branch_name] = delta
+            if stack:
+                target = delta
+        return tree
+
 
 class Commit(typing.NamedTuple):
     sha: str
@@ -308,31 +330,6 @@ def get_delta_branches(local, upstream, branch_template) -> list[str]:
         c.get_branch_name(branch_template) for c in commits
         if c.get_branch_name(branch_template) in branches
     ]
-
-
-def build_tree(
-    local: str,
-    upstream: str,
-    anchor_commit: str,
-    branch_template: str,
-    stack: bool = True
-) -> dict[str, Delta]:
-    """Create a simple plan including all local commits.
-
-    If stack is False, treat every commit as an independent delta, otherwise
-    create a stack of deltas.
-    """
-    commits = get_local_commits(local, upstream)
-    tree: dict[str, Delta] = {}
-    target = None
-    for commit in commits:
-        delta = Delta(
-            [commit], target, anchor_commit, upstream, branch_template
-        )
-        tree[delta.branch_name] = delta
-        if stack:
-            target = delta
-    return tree
 
 
 def infer_delta_last_commit(
@@ -949,13 +946,9 @@ def plan(app, strategy, edit, show) -> None:
 
     """
     if strategy == "stack":
-        tree = build_tree(
-            app.local, app.upstream_name, app.anchor_commit, app.branch_template, stack=True
-        )
+        tree = app.build_tree(stack=True)
     elif strategy == "flat":
-        tree = build_tree(
-            app.local, app.upstream_name, app.anchor_commit, app.branch_template, stack=False
-        )
+        tree = app.build_tree(stack=False)
     elif strategy == "empty":
         tree = {}
     elif strategy == "detect":

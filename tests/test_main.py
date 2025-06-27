@@ -23,6 +23,18 @@ remote={REMOTE}
 branch-template={BRANCH_TEMPLATE}
 """
 
+COMMANDS = [
+    "checkout",
+    "log",
+    "plan",
+    "pull",
+    "push",
+    "remix",
+    "reset",
+    "status",
+    "write"
+]
+
 
 @pytest.fixture(autouse=True)
 def configuration(tmp_path):
@@ -319,10 +331,14 @@ def test_reconstruct_tree_stacked(app, serially_dependent_commits, anchor_commit
     }
 
 
-def test_plan__not_a_git_repo():
+@pytest.mark.parametrize("cmd", COMMANDS)
+def test_plan__not_a_git_repo(cmd):
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli_group, ["plan"])
+        if cmd == "checkout":
+            result = runner.invoke(cli_group, [cmd, "local"])
+        else:
+            result = runner.invoke(cli_group, [cmd])
     assert result.exit_code == 1
     assert (
         "Error: No git repository detected"

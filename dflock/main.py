@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import re
 import configparser
+from dataclasses import dataclass
 from pathlib import Path
 from hashlib import md5
 from graphlib import TopologicalSorter
@@ -41,57 +42,56 @@ INSTRUCTIONS = """
 
 def on_local(f):
     @functools.wraps(f)
-    def wrapper(ctx, *args, **kwargs):
-        local = ctx.obj["config"]["local"]
-        if utils.get_current_branch() != local:
+    def wrapper(app, *args, **kwargs):
+        if utils.get_current_branch() != app.local:
             raise click.ClickException(
-                f"You must be on your the local branch: {local}"
+                f"You must be on your the local branch: {app.local}"
             )
-        return f(ctx, *args, **kwargs)
+        return f(app, *args, **kwargs)
 
     return wrapper
 
 
 def no_hot_branch(f) -> typing.Callable:
     @functools.wraps(f)
-    def wrapper(ctx, *args, **kwargs):
-        local = ctx.obj["config"]["local"]
-        upstream = get_upstream_name(
-            ctx.obj["config"]["upstream"],
-            ctx.obj["config"]["remote"],
-        )
-        branch_template = ctx.obj["config"]["branch-template"]
+    def wrapper(app, *args, **kwargs):
+        upstream = get_upstream_name(app.upstream, app.remote)
         if utils.get_current_branch() in _get_hot_branches(
-            local, upstream, branch_template
+            app.local, upstream, app.branch_template
         ):
             raise click.ClickException(
                 "please switch to a branch not managed by dflock before "
                 "continuing"
             )
-        return f(ctx, *args, **kwargs)
+        return f(app, *args, **kwargs)
 
     return wrapper
 
 
 def undiverged(f):
     @functools.wraps(f)
-    def wrapper(ctx, *args, **kwargs):
-        local = ctx.obj["config"]["local"]
-        upstream = get_upstream_name(
-            ctx.obj["config"]["upstream"],
-            ctx.obj["config"]["remote"],
-        )
-        remote = ctx.obj["config"]["remote"]
-        if utils.have_diverged(upstream, local):
+    def wrapper(app, *args, **kwargs):
+        upstream = get_upstream_name(app.upstream, app.remote)
+        if utils.have_diverged(upstream, app.local):
             click.echo(
                 "Hint: Use `dfl pull` or "
-                f"`git pull --rebase {remote} {upstream}` to pull "
+                f"`git pull --rebase {app.remote} {app.upstream}` to pull "
                 "upstream changes into your local branch."
             )
             raise click.ClickException(
                 "Your local and upstream have diverged."
             )
-        return f(ctx, *args, **kwargs)
+        return f(app, *args, **kwargs)
+
+    return wrapper
+
+
+def pass_app(f):
+    @click.pass_context
+    @functools.wraps(f)
+    def wrapper(ctx, *args, **kwargs):
+        app = App.from_config(ctx.obj["config"])
+        return f(app, *args, **kwargs)
 
     return wrapper
 
@@ -132,6 +132,33 @@ class CherryPickFailed(DflockException):
 
 class NoRemoteTrackingBranch(DflockException):
     pass
+
+
+@dataclass
+class App:
+    local: str
+    upstream: str
+    remote: str
+    branch_template: str
+    anchor_commit: str
+    editor: str
+
+    @classmethod
+    def from_config(cls, config: typing.Mapping) -> typing.Self:
+        return cls(
+            local=config["local"],
+            upstream=config["upstream"],
+            remote=config["remote"],
+            branch_template=config["branch-template"],
+            anchor_commit=config["anchor-commit"],
+            editor=config["editor"],
+        )
+
+    @property
+    def upstream_name(self):
+        if self.remote == "":
+            return self.upstream
+        return f"{self.remote}/{self.upstream}"
 
 
 class Commit(typing.NamedTuple):
@@ -817,26 +844,20 @@ def cli():
     type=bool,
     help="Use Gitlab-specific push-options to create a merge request",
 )
-@click.pass_context
+@pass_app
 def push(
-    ctx,
+    app,
     delta_references,
     write,
     interactive,
     gitlab_merge_request
 ) -> None:
     """Push deltas to the remote."""
-    remote = ctx.obj["config"]["remote"]
-    if remote == "":
+    if app.remote == "":
         raise click.ClickException("Remote must be set.")
-    local = ctx.obj["config"]["local"]
-    upstream = get_upstream_name(
-        ctx.obj["config"]["upstream"],
-        ctx.obj["config"]["remote"],
+    tree = reconstruct_tree(
+        app.local, app.upstream_name, app.anchor_commit, app.branch_template
     )
-    anchor_commit = ctx.obj["config"]["anchor-commit"]
-    branch_template = ctx.obj["config"]["branch-template"]
-    tree = reconstruct_tree(local, upstream, anchor_commit, branch_template)
     if write:
         try:
             with utils.return_to_head():
@@ -855,11 +876,11 @@ def push(
     for delta in deltas:
         if interactive:
             do_it = click.confirm(
-                f"Push {delta.branch_name} to {remote}?", default=True
+                f"Push {delta.branch_name} to {app.remote}?", default=True
             )
         if not interactive or do_it:
             push_command = delta.get_force_push_command(
-                remote, gitlab_merge_request=gitlab_merge_request
+                app.remote, gitlab_merge_request=gitlab_merge_request
             )
             click.echo(f"Pushing {delta.branch_name}.")
             output = utils.run(*push_command)
@@ -887,11 +908,11 @@ def push(
     type=bool,
     help="Only show the plan without executing it.",
 )
-@click.pass_context
+@pass_app
 @clean_work_tree
 @no_hot_branch
 @undiverged
-def plan(ctx, strategy, edit, show) -> None:
+def plan(app, strategy, edit, show) -> None:
     """Create a plan and update local branches.
 
     The optional argument specifies the type of plan to generate. Available
@@ -905,33 +926,25 @@ def plan(ctx, strategy, edit, show) -> None:
     empty: generate an empty plan
 
     """
-    local = ctx.obj["config"]["local"]
-    upstream = get_upstream_name(
-        ctx.obj["config"]["upstream"],
-        ctx.obj["config"]["remote"],
-    )
-    anchor_commit = ctx.obj["config"]["anchor-commit"]
-    branch_template = ctx.obj["config"]["branch-template"]
-    editor = ctx.obj["config"]["editor"]
     if strategy == "stack":
         tree = build_tree(
-            local, upstream, anchor_commit, branch_template, stack=True
+            app.local, app.upstream_name, app.anchor_commit, app.branch_template, stack=True
         )
     elif strategy == "flat":
         tree = build_tree(
-            local, upstream, anchor_commit, branch_template, stack=False
+            app.local, app.upstream_name, app.anchor_commit, app.branch_template, stack=False
         )
     elif strategy == "empty":
         tree = {}
     elif strategy == "detect":
         tree = reconstruct_tree(
-            local, upstream, anhcor_commit, branch_template
+            app.local, app.upstream_name, app.anchor_commit, app.branch_template
         )
     else:
         raise ValueError("This shouldn't happen")
-    plan = render_plan(tree, local, upstream)
+    plan = render_plan(tree, app.local, app.upstream_name)
     if (edit or strategy == "detect") and not show:
-        new_plan = edit_interactively(plan + INSTRUCTIONS, editor)
+        new_plan = edit_interactively(plan + INSTRUCTIONS, app.editor)
         new_plan = "\n".join(iterate_plan(new_plan))
         if not new_plan.strip():
             click.echo("Aborting.")
@@ -942,14 +955,14 @@ def plan(ctx, strategy, edit, show) -> None:
     if not show:
         try:
             tree = parse_plan(
-                new_plan, local, upstream, anchor_commit, branch_template
+                new_plan, app.local, app.upstream_name, app.anchor_commit, app.branch_template
             )
             with utils.return_to_head():
                 write_plan(tree)
             click.echo(
                 "Branches updated. Run `dfl push` to push them to a remote."
             )
-            prune_local_branches(tree, local, upstream, branch_template)
+            prune_local_branches(tree, app.local, app.upstream_name, app.branch_template)
         except ParsingError as exc:
             raise click.ClickException(str(exc))
         except (PlanError, CherryPickFailed) as exc:
@@ -966,18 +979,12 @@ def plan(ctx, strategy, edit, show) -> None:
     help="Print target of each branch",
 )
 @inside_work_tree
-@click.pass_context
-def status(ctx, show_targets) -> None:
+@pass_app
+def status(app, show_targets) -> None:
     """Show status of delta branches."""
-    local = ctx.obj["config"]["local"]
-    upstream = get_upstream_name(
-        ctx.obj["config"]["upstream"],
-        ctx.obj["config"]["remote"],
-    )
-    branch_template = ctx.obj["config"]["branch-template"]
-    diverged = utils.have_diverged(upstream, local)
-    branches = get_delta_branches(local, upstream, branch_template)
-    on_local = utils.get_current_branch() == local
+    diverged = utils.have_diverged(app.upstream_name, app.local)
+    branches = get_delta_branches(app.local, app.upstream_name, app.branch_template)
+    on_local = utils.get_current_branch() == app.local
     if on_local:
         click.echo("On local branch.")
     else:
@@ -986,9 +993,8 @@ def status(ctx, show_targets) -> None:
         click.echo("Local and upstream have diverged")
     if len(branches) > 0:
         if show_targets:
-            anchor_commit = ctx.obj["config"]["anchor-commit"]
             tree = reconstruct_tree(
-                local, upstream, anchor_commit, branch_template
+                app.local, app.upstream_name, app.anchor_commit, app.branch_template
             )
         click.echo("\nDeltas:")
         for i, branch in enumerate(branches):
@@ -1010,58 +1016,47 @@ def status(ctx, show_targets) -> None:
 @cli_group.command()
 @inside_work_tree
 @clean_work_tree
-@click.pass_context
+@pass_app
 @undiverged
 @on_local
-def remix(ctx) -> None:
+def remix(app) -> None:
     """Alias for `git rebase -i <upstream>`.
 
     Only works when on local.
     """
-    upstream = get_upstream_name(
-        ctx.obj["config"]["upstream"],
-        ctx.obj["config"]["remote"],
-    )
-    subprocess.run(f"git rebase -i {upstream}", shell=True)
+    subprocess.run(f"git rebase -i {app.upstream_name}", shell=True)
 
 
 @cli_group.command()
 @inside_work_tree
-@click.pass_context
+@pass_app
 @on_local
-def pull(ctx) -> None:
+def pull(app) -> None:
     """Alias for `git pull --rebase <upstream>`.
 
     Only works when on local.
     """
-    upstream = ctx.obj["config"]["upstream"]
-    remote = ctx.obj["config"]["remote"]
-    if remote == "":
+    if app.remote == "":
         raise click.ClickException("Remote must be set.")
-    subprocess.run(f"git pull --rebase {remote} {upstream}", shell=True)
+    subprocess.run(f"git pull --rebase {app.remote} {app.upstream}", shell=True)
 
 
 @cli_group.command()
 @inside_work_tree
-@click.pass_context
+@pass_app
 @undiverged
-def log(ctx) -> None:
+def log(app) -> None:
     """Alias for `git log <local> ^<upstream>`."""
-    local = ctx.obj["config"]["local"]
-    if utils.get_current_branch() != local:
+    if utils.get_current_branch() != app.local:
         click.echo("Warning: not on local branch.")
-    upstream = get_upstream_name(
-        ctx.obj["config"]["upstream"],
-        ctx.obj["config"]["remote"],
-    )
-    subprocess.run(f"git log {local} ^{upstream}", shell=True)
+    subprocess.run(f"git log {app.local} ^{app.upstream_name}", shell=True)
 
 
 @cli_group.command()
 @inside_work_tree
 @click.argument("delta-reference", type=str)
-@click.pass_context
-def checkout(ctx, delta_reference) -> None:
+@pass_app
+def checkout(app, delta_reference) -> None:
     """Checkout deltas or the local branch.
 
     If DELTA_REFERENCE is "local" or the name of your local branch, checkout
@@ -1072,16 +1067,10 @@ def checkout(ctx, delta_reference) -> None:
 
     Otherwise, try to do a partial match against your delta branch names.
     This only works if there is a unique match."""
-    local = ctx.obj["config"]["local"]
-    upstream = get_upstream_name(
-        ctx.obj["config"]["upstream"],
-        ctx.obj["config"]["remote"],
-    )
-    branch_template = ctx.obj["config"]["branch-template"]
-    if delta_reference in ["local", local]:
-        branch = local
+    if delta_reference in ["local", app.local]:
+        branch = app.local
     else:
-        branches = get_delta_branches(local, upstream, branch_template)
+        branches = get_delta_branches(app.local, app.upstream_name, app.branch_template)
         try:
             branch = resolve_delta(delta_reference, branches)
         except ValueError as exc:
@@ -1092,19 +1081,13 @@ def checkout(ctx, delta_reference) -> None:
 @cli_group.command()
 @inside_work_tree
 @clean_work_tree
-@click.pass_context
+@pass_app
 @no_hot_branch
 @undiverged
-def write(ctx) -> None:
+def write(app) -> None:
     """Update deltas based on the current plan."""
-    local = ctx.obj["config"]["local"]
-    upstream = get_upstream_name(
-        ctx.obj["config"]["upstream"],
-        ctx.obj["config"]["remote"],
-    )
-    anchor_commit = ctx.obj["config"]["anchor-commit"]
-    branch_template = ctx.obj["config"]["branch-template"]
-    tree = reconstruct_tree(local, upstream, anchor_commit, branch_template)
+    upstream = get_upstream_name(app.upstream, app.remote)
+    tree = reconstruct_tree(app.local, upstream, app.anchor_commit, app.branch_template)
     try:
         with utils.return_to_head():
             write_plan(tree)
@@ -1122,18 +1105,13 @@ def write(ctx) -> None:
     help="Do not ask for confirmation."
 )
 @click.pass_context
-def reset(ctx, yes) -> None:
+def reset(app, yes) -> None:
     """Reset the plan.
 
     This removes all dflock-managed branches.
     """
-    local = ctx.obj["config"]["local"]
-    upstream = get_upstream_name(
-        ctx.obj["config"]["upstream"],
-        ctx.obj["config"]["remote"],
-    )
-    branch_template = ctx.obj["config"]["branch-template"]
-    branches = get_delta_branches(local, upstream, branch_template)
+    upstream = get_upstream_name(app.upstream, app.remote)
+    branches = get_delta_branches(app.local, upstream, app.branch_template)
     if len(branches) == 0:
         click.echo("No active branches found")
         return

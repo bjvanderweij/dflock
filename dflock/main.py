@@ -225,6 +225,18 @@ class Delta(typing.NamedTuple):
         )
 
 
+class _BranchCommand(typing.NamedTuple):
+    label: str
+    target_label: None | str
+    commit_sha: str
+
+
+class _CommitList(typing.NamedTuple):
+    label: str
+    target_label: None | str
+    commits: list[Commit]
+
+
 @dataclass
 class App:
     local: str
@@ -492,8 +504,8 @@ class App:
         return self._create_delta(branch_commits, target)
 
     def _make_commit_lists(
-        self, branch_commands: typing.Iterable["_BranchCommand"],
-    ) -> list["_CommitList"]:
+        self, branch_commands: typing.Iterable[_BranchCommand],
+    ) -> list[_CommitList]:
         """Build lists of contiguous commits belonging to a branch."""
         branches: list[_CommitList] = []
         local_commits = iter(self._get_local_commits())
@@ -518,7 +530,7 @@ class App:
         return branches
 
     def _build_tree(
-        self, candidate_deltas: typing.Iterable["_CommitList"],
+        self, candidate_deltas: typing.Iterable[_CommitList],
     ) -> dict[str, Delta]:
         """Parse branching plan and return a branch DAG.
 
@@ -553,7 +565,7 @@ class App:
         return {b.branch_name: b for b in deltas.values()}
 
 
-def _tokenize_plan(plan: str) -> typing.Iterable["_BranchCommand"]:
+def _tokenize_plan(plan: str) -> typing.Iterable[_BranchCommand]:
     for line in iterate_plan(plan):
         try:
             command, sha, *_ = line.split()
@@ -632,18 +644,6 @@ def write_plan(tree: dict[str, Delta]):
             delta.create_branch()
             updated[branch_name] = False
     return updated
-
-
-class _BranchCommand(typing.NamedTuple):
-    label: str
-    target_label: None | str
-    commit_sha: str
-
-
-class _CommitList(typing.NamedTuple):
-    label: str
-    target_label: None | str
-    commits: list[Commit]
 
 
 def iterate_plan(plan: str):

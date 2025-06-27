@@ -47,8 +47,10 @@ def git_repository(tmp_path):
 
 
 @pytest.fixture()
-def runner():
-    yield CliRunner()
+def runner(git_repository):
+    runner = CliRunner()
+    with runner.isolated_filesystem(git_repository):
+        yield runner
 
 
 @pytest.fixture()
@@ -323,7 +325,8 @@ def test_reconstruct_tree_stacked(app, serially_dependent_commits, anchor_commit
     }
 
 
-def test_plan__not_a_git_repo(runner):
+def test_plan__not_a_git_repo():
+    runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
@@ -368,8 +371,7 @@ def test_plan__failed_cherry_pick(
     commit(dict(a="b"), "1")
     commit(dict(a="c"), "2")
     create_branch(LOCAL)
-    with runner.isolated_filesystem(git_repository):
-        result = runner.invoke(cli_group, ["plan", "flat"])
+    result = runner.invoke(cli_group, ["plan", "flat"])
     assert result.exit_code == 1
     assert (
         "Error: Cherry-pick failed"
@@ -385,8 +387,7 @@ def test_plan__duplicate_commit_names(
     commit(dict(a="b"), "1")
     commit(dict(a="c"), "1")
     create_branch(LOCAL)
-    with runner.isolated_filesystem(git_repository):
-        result = runner.invoke(cli_group, ["plan"])
+    result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
     assert (
         "Error: Duplicate commit messages found in local commits."
@@ -401,8 +402,7 @@ def test_plan__diverged(
     create_branch(LOCAL)
     commit(dict(a="b"), "1")
     create_branch(UPSTREAM)
-    with runner.isolated_filesystem(git_repository):
-        result = runner.invoke(cli_group, ["plan"])
+    result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
     assert "Error: Your local and upstream have diverged." in result.output
 
@@ -412,8 +412,7 @@ def test_plan__nonexistent_upstream(
 ):
     commit(dict(a="a"), "0")
     create_branch(LOCAL)
-    with runner.isolated_filesystem(git_repository):
-        result = runner.invoke(cli_group, ["plan"])
+    result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
     assert f"Error: Upstream {UPSTREAM} does not exist" in result.output
 
@@ -423,8 +422,7 @@ def test_plan__nonexistent_local(
 ):
     commit(dict(a="a"), "0")
     create_branch(UPSTREAM)
-    with runner.isolated_filesystem(git_repository):
-        result = runner.invoke(cli_group, ["plan"])
+    result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
     assert f"Error: Local {LOCAL} does not exist" in result.output
 
@@ -438,8 +436,7 @@ def test_plan__work_tree_not_clean(
     create_branch(LOCAL)
     with open(git_repository / "a", "w") as f:
         f.write("ab")
-    with runner.isolated_filesystem(git_repository):
-        result = runner.invoke(cli_group, ["plan"])
+    result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
     assert "Error: Work tree not clean." in result.output
 

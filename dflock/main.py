@@ -963,6 +963,10 @@ def plan(app, strategy, edit, show) -> None:
 @pass_app
 def status(app, show_targets) -> None:
     """Show status of delta branches."""
+    if not utils.object_exists(app.upstream):
+        raise click.ClickException(f"Upstream {app.upstream} does not exist")
+    if not utils.object_exists(app.local):
+        raise click.ClickException(f"Local {app.local} does not exist")
     diverged = utils.have_diverged(app.upstream_name, app.local)
     branches = get_delta_branches(app.local, app.upstream_name, app.branch_template)
     on_local = utils.get_current_branch() == app.local

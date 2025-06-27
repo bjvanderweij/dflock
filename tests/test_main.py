@@ -118,9 +118,10 @@ def commit(git_repository):
 
 @pytest.fixture
 def create_branch(git_repository):
-    def _create_branch(name):
+    def _create_branch(name, checkout=False):
         utils.run("checkout", "-b", name, cwd=git_repository)
-        utils.run("checkout", "-", cwd=git_repository)
+        if not checkout:
+            utils.run("checkout", "-", cwd=git_repository)
     return _create_branch
 
 
@@ -486,3 +487,49 @@ def test_empty_tree__git(app, create_branch, commit, git_repository):
     create_branch(LOCAL)
     tree = app.reconstruct_tree()
     assert tree == {}
+
+
+def test_status__on_local(runner, commit, create_branch, git_repository):
+    commit(dict(a="a"), "a")
+    create_branch(UPSTREAM)
+    commit(dict(b="b"), "b")
+    create_branch(LOCAL, checkout=True)
+    result = runner.invoke(cli_group, ["status"])
+    assert result.exit_code == 0
+    assert "On local branch" in result.output
+
+
+def test_status__not_on_local(runner, commit, create_branch, git_repository):
+    commit(dict(a="a"), "a")
+    create_branch(UPSTREAM)
+    commit(dict(b="b"), "b")
+    create_branch(LOCAL)
+    result = runner.invoke(cli_group, ["status"])
+    assert result.exit_code == 0
+    assert "NOT on local branch" in result.output
+
+
+def test_status__show_branches(runner, commit, create_branch, git_repository):
+    commit(dict(a="a"), "a")
+    create_branch(UPSTREAM)
+    sha = commit(dict(b="b"), "b")
+    c0 = Commit(sha, "b")
+    create_branch(c0.get_branch_name(BRANCH_TEMPLATE))
+    create_branch(LOCAL)
+    result = runner.invoke(cli_group, ["status"])
+    assert result.exit_code == 0
+    assert "Deltas:" in result.output
+    assert c0.get_branch_name(BRANCH_TEMPLATE) in result.output
+
+
+def test_status__show_branches_with_targets(runner, commit, create_branch, git_repository):
+    commit(dict(a="a"), "a")
+    create_branch(UPSTREAM)
+    sha = commit(dict(b="b"), "b")
+    c0 = Commit(sha, "b")
+    create_branch(c0.get_branch_name(BRANCH_TEMPLATE))
+    create_branch(LOCAL)
+    result = runner.invoke(cli_group, ["status", "--show-targets"])
+    assert result.exit_code == 0
+    assert "Deltas:" in result.output
+    assert c0.get_branch_name(BRANCH_TEMPLATE) in result.output

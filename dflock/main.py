@@ -162,13 +162,13 @@ class Commit(typing.NamedTuple):
 class Delta(typing.NamedTuple):
     commits: list[Commit]
     target: typing.Optional["Delta"]
-    branch_anchor: str
+    anchor_commit: str
     upstream: str
     branch_template: str
 
     @property
     def branch_name(self) -> str:
-        if self.branch_anchor == "first":
+        if self.anchor_commit == "first":
             return self.commits[0].get_branch_name(self.branch_template)
         else:
             return self.commits[-1].get_branch_name(self.branch_template)
@@ -266,7 +266,7 @@ def get_delta_branches(local, upstream, branch_template) -> list[str]:
 def build_tree(
     local: str,
     upstream: str,
-    branch_anchor: str,
+    anchor_commit: str,
     branch_template: str,
     stack: bool = True
 ) -> dict[str, Delta]:
@@ -280,7 +280,7 @@ def build_tree(
     target = None
     for commit in commits:
         delta = Delta(
-            [commit], target, branch_anchor, upstream, branch_template
+            [commit], target, anchor_commit, upstream, branch_template
         )
         tree[delta.branch_name] = delta
         if stack:
@@ -295,7 +295,7 @@ def infer_delta_last_commit(
     tree: dict[str, Delta],
     root: Commit,
     upstream: str,
-    branch_anchor: str,
+    anchor_commit: str,
     branch_template: str,
 ) -> Delta:
     candidate_commits = get_last_n_commits(
@@ -344,7 +344,7 @@ def infer_delta_last_commit(
                     + cc.short_message
                 )
             break
-    return Delta(commits, target, branch_anchor, upstream, branch_template)
+    return Delta(commits, target, anchor_commit, upstream, branch_template)
 
 
 def infer_delta_first_commit(
@@ -354,7 +354,7 @@ def infer_delta_first_commit(
     tree: dict[str, Delta],
     root: Commit,
     upstream: str,
-    branch_anchor: str,
+    anchor_commit: str,
     branch_template: str,
 ) -> Delta:
     n_local = len(commits_by_message)
@@ -384,14 +384,14 @@ def infer_delta_first_commit(
             )
             break
     return Delta(
-        branch_commits, target, branch_anchor, upstream, branch_template
+        branch_commits, target, anchor_commit, upstream, branch_template
     )
 
 
 def reconstruct_tree(
     local: str,
     upstream: str,
-    branch_anchor: str,
+    anchor_commit: str,
     branch_template: str
 ) -> dict[str, Delta]:
     """Use local commits to reconstruct the plan.
@@ -430,7 +430,7 @@ def reconstruct_tree(
     tree: dict[str, Delta] = {}
     for i, commit in enumerate(commits):
         if commit.get_branch_name(branch_template) in local_branches:
-            if branch_anchor == "first":
+            if anchor_commit == "first":
                 delta = infer_delta_first_commit(
                     commit,
                     i,
@@ -438,7 +438,7 @@ def reconstruct_tree(
                     tree,
                     root,
                     upstream,
-                    branch_anchor,
+                    anchor_commit,
                     branch_template,
                 )
             else:
@@ -449,7 +449,7 @@ def reconstruct_tree(
                     tree,
                     root,
                     upstream,
-                    branch_anchor,
+                    anchor_commit,
                     branch_template,
                 )
             tree[delta.branch_name] = delta
@@ -570,7 +570,7 @@ def _build_tree(
     candidate_deltas: typing.Iterable[_CommitList],
     local: str,
     upstream: str,
-    branch_anchor: str,
+    anchor_commit: str,
     branch_template: str,
 ) -> dict[str, Delta]:
     """Parse branching plan and return a branch DAG.
@@ -603,7 +603,7 @@ def _build_tree(
             valid_target_labels = {last_target_label}
         valid_target_labels.add(d.label)
         deltas[d.label] = Delta(
-            d.commits, target_branch, branch_anchor, upstream, branch_template
+            d.commits, target_branch, anchor_commit, upstream, branch_template
 
         )
     return {b.branch_name: b for b in deltas.values()}
@@ -613,7 +613,7 @@ def parse_plan(
     plan: str,
     local: str,
     upstream: str,
-    branch_anchor: str,
+    anchor_commit: str,
     branch_template: str
 ) -> dict[str, Delta]:
     tokens = _tokenize_plan(plan)
@@ -622,7 +622,7 @@ def parse_plan(
         commit_lists,
         local,
         upstream,
-        branch_anchor,
+        anchor_commit,
         branch_template
     )
 
@@ -738,7 +738,7 @@ def read_config(ctx, cmd, path):
         "upstream": DEFAULT_UPSTREAM,
         "local": DEFAULT_LOCAL,
         "remote": DEFAULT_REMOTE,
-        "branch-anchor": DEFAULT_BRANCH_ANCHOR,
+        "anchor-commit": DEFAULT_BRANCH_ANCHOR,
         "branch-template": DEFAULT_BRANCH_TEMPLATE,
         "editor": DEFAULT_EDITOR,
     }
@@ -834,9 +834,9 @@ def push(
         ctx.obj["config"]["upstream"],
         ctx.obj["config"]["remote"],
     )
-    branch_anchor = ctx.obj["config"]["branch-anchor"]
+    anchor_commit = ctx.obj["config"]["anchor-commit"]
     branch_template = ctx.obj["config"]["branch-template"]
-    tree = reconstruct_tree(local, upstream, branch_anchor, branch_template)
+    tree = reconstruct_tree(local, upstream, anchor_commit, branch_template)
     if write:
         try:
             with utils.return_to_head():
@@ -910,22 +910,22 @@ def plan(ctx, strategy, edit, show) -> None:
         ctx.obj["config"]["upstream"],
         ctx.obj["config"]["remote"],
     )
-    branch_anchor = ctx.obj["config"]["branch-anchor"]
+    anchor_commit = ctx.obj["config"]["anchor-commit"]
     branch_template = ctx.obj["config"]["branch-template"]
     editor = ctx.obj["config"]["editor"]
     if strategy == "stack":
         tree = build_tree(
-            local, upstream, branch_anchor, branch_template, stack=True
+            local, upstream, anchor_commit, branch_template, stack=True
         )
     elif strategy == "flat":
         tree = build_tree(
-            local, upstream, branch_anchor, branch_template, stack=False
+            local, upstream, anchor_commit, branch_template, stack=False
         )
     elif strategy == "empty":
         tree = {}
     elif strategy == "detect":
         tree = reconstruct_tree(
-            local, upstream, branch_anchor, branch_template
+            local, upstream, anhcor_commit, branch_template
         )
     else:
         raise ValueError("This shouldn't happen")
@@ -942,7 +942,7 @@ def plan(ctx, strategy, edit, show) -> None:
     if not show:
         try:
             tree = parse_plan(
-                new_plan, local, upstream, branch_anchor, branch_template
+                new_plan, local, upstream, anchor_commit, branch_template
             )
             with utils.return_to_head():
                 write_plan(tree)
@@ -986,9 +986,9 @@ def status(ctx, show_targets) -> None:
         click.echo("Local and upstream have diverged")
     if len(branches) > 0:
         if show_targets:
-            branch_anchor = ctx.obj["config"]["branch-anchor"]
+            anchor_commit = ctx.obj["config"]["anchor-commit"]
             tree = reconstruct_tree(
-                local, upstream, branch_anchor, branch_template
+                local, upstream, anchor_commit, branch_template
             )
         click.echo("\nDeltas:")
         for i, branch in enumerate(branches):
@@ -1102,9 +1102,9 @@ def write(ctx) -> None:
         ctx.obj["config"]["upstream"],
         ctx.obj["config"]["remote"],
     )
-    branch_anchor = ctx.obj["config"]["branch-anchor"]
+    anchor_commit = ctx.obj["config"]["anchor-commit"]
     branch_template = ctx.obj["config"]["branch-template"]
-    tree = reconstruct_tree(local, upstream, branch_anchor, branch_template)
+    tree = reconstruct_tree(local, upstream, anchor_commit, branch_template)
     try:
         with utils.return_to_head():
             write_plan(tree)

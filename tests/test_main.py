@@ -15,7 +15,7 @@ UPSTREAM = "upstream"
 LOCAL = "local"
 REMOTE = ""
 BRANCH_TEMPLATE = "test/{}"
-BRANCH_ANCHOR = "first"
+ANCHOR_COMMIT = "first"
 TEST_CONFIG = f"""[dflock]
 upstream={UPSTREAM}
 local={LOCAL}
@@ -127,7 +127,7 @@ def checkout(git_repository):
 
 
 def test_parse_plan__syntax_errors(local_commits):
-    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     with pytest.raises(ParsingError):
         parse_plan("s 0 a\na 1 b\ns 2 v", *config_args) == {}
     with pytest.raises(ParsingError):
@@ -137,7 +137,7 @@ def test_parse_plan__syntax_errors(local_commits):
 
 
 def test_parse_plan__illegal_plans(local_commits):
-    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     with pytest.raises(PlanError, match="cannot match"):
         # Unrecognized commit
         parse_plan("s 0 a\nb1 a\ns 2 v", *config_args) == {}
@@ -158,10 +158,10 @@ def test_parse_plan__illegal_plans(local_commits):
         parse_plan("b 0 a\nb1@b 1 foo\nb2 2 v", *config_args) == {}
 
 
-@pytest.mark.parametrize("branch_anchor", ["first", "last"])
-def test_parse_plan__legal_plans(local_commits, branch_anchor):
-    config_args = [branch_anchor, UPSTREAM, BRANCH_TEMPLATE]
-    config_args_parse = [LOCAL, UPSTREAM, branch_anchor, BRANCH_TEMPLATE]
+@pytest.mark.parametrize("anchor_commit", ["first", "last"])
+def test_parse_plan__legal_plans(local_commits, anchor_commit):
+    config_args = [anchor_commit, UPSTREAM, BRANCH_TEMPLATE]
+    config_args_parse = [LOCAL, UPSTREAM, anchor_commit, BRANCH_TEMPLATE]
     a, b, c, d = local_commits
     # Equivalent plans
     delta = Delta([c], None, *config_args)
@@ -235,8 +235,8 @@ def dag_commits(commit, create_branch):
     return get_local_commits(LOCAL, UPSTREAM)
 
 
-@pytest.mark.parametrize("branch_anchor", ["first", "last"])
-def test_reconstruct_tree__branch_anchor(branch_anchor, dag_commits):
+@pytest.mark.parametrize("anchor_commit", ["first", "last"])
+def test_reconstruct_tree__anchor_commit(anchor_commit, dag_commits):
     c1, c2, c3, c4 = dag_commits
     plan = (
         f"b0 {c1.short_str}\n"
@@ -244,14 +244,14 @@ def test_reconstruct_tree__branch_anchor(branch_anchor, dag_commits):
         f"b1 {c3.short_str}\n"
         f"b2@b0 {c4.short_str}"
     )
-    config_args = [LOCAL, UPSTREAM, branch_anchor, BRANCH_TEMPLATE]
+    config_args = [LOCAL, UPSTREAM, anchor_commit, BRANCH_TEMPLATE]
     tree = parse_plan(plan, *config_args)
     write_plan(tree)
     reconstructed_tree = reconstruct_tree(*config_args)
-    b = Delta([c1, c2], None, branch_anchor, UPSTREAM, BRANCH_TEMPLATE)
-    b1 = Delta([c3], None, branch_anchor, UPSTREAM, BRANCH_TEMPLATE)
-    b2 = Delta([c4], b, branch_anchor, UPSTREAM, BRANCH_TEMPLATE)
-    if branch_anchor == "first":
+    b = Delta([c1, c2], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
+    b1 = Delta([c3], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
+    b2 = Delta([c4], b, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
+    if anchor_commit == "first":
         assert reconstructed_tree == {
             c1.get_branch_name(BRANCH_TEMPLATE): b,
             c3.get_branch_name(BRANCH_TEMPLATE): b1,
@@ -265,8 +265,8 @@ def test_reconstruct_tree__branch_anchor(branch_anchor, dag_commits):
         }
 
 
-@pytest.mark.parametrize("branch_anchor", ["first", "last"])
-def test_reconstruct_tree(dag_commits, branch_anchor):
+@pytest.mark.parametrize("anchor_commit", ["first", "last"])
+def test_reconstruct_tree(dag_commits, anchor_commit):
     c1, c2, c3, c4 = dag_commits
     plan = (
         f"b0 {c1.short_str}\n"
@@ -274,16 +274,16 @@ def test_reconstruct_tree(dag_commits, branch_anchor):
         f"b1 {c3.short_str}\n"
         f"b2@b0 {c4.short_str}"
     )
-    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     tree = parse_plan(plan, *config_args)
     write_plan(tree)
-    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     reconstructed_tree = reconstruct_tree(*config_args)
     reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
     assert reconstructed_plan == plan
-    b0 = Delta([c1, c2], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
-    b1 = Delta([c3], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
-    b2 = Delta([c4], b0, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b0 = Delta([c1, c2], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b1 = Delta([c3], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b2 = Delta([c4], b0, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
     assert reconstructed_tree == {
         b0.branch_name: b0,
         b1.branch_name: b1,
@@ -291,14 +291,14 @@ def test_reconstruct_tree(dag_commits, branch_anchor):
     }
 
 
-@pytest.mark.parametrize("branch_anchor", ["first", "last"])
-def test_reconstruct_tree_stacked(serially_dependent_commits, branch_anchor):
+@pytest.mark.parametrize("anchor_commit", ["first", "last"])
+def test_reconstruct_tree_stacked(serially_dependent_commits, anchor_commit):
     c1, c2, c3, c4 = serially_dependent_commits
     tree = build_tree(
-        LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE, stack=True
+        LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE, stack=True
     )
     write_plan(tree)
-    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     reconstructed_tree = reconstruct_tree(*config_args)
     reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
     plan = (
@@ -308,10 +308,10 @@ def test_reconstruct_tree_stacked(serially_dependent_commits, branch_anchor):
         f"b3@b2 {c4.short_str}"
     )
     assert reconstructed_plan == plan
-    b0 = Delta([c1], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
-    b1 = Delta([c2], b0, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
-    b2 = Delta([c3], b1, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
-    b3 = Delta([c4], b2, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b0 = Delta([c1], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b1 = Delta([c2], b0, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b2 = Delta([c3], b1, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b3 = Delta([c4], b2, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
     assert reconstructed_tree == {
         b0.branch_name: b0,
         b1.branch_name: b1,
@@ -320,14 +320,14 @@ def test_reconstruct_tree_stacked(serially_dependent_commits, branch_anchor):
     }
 
 
-@pytest.mark.parametrize("branch_anchor", ["first", "last"])
-def test_reconstruct_tree_independent(independent_commits, branch_anchor):
+@pytest.mark.parametrize("anchor_commit", ["first", "last"])
+def test_reconstruct_tree_independent(independent_commits, anchor_commit):
     c1, c2, c3, c4 = independent_commits
     tree = build_tree(
-        LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE, stack=False
+        LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE, stack=False
     )
     write_plan(tree)
-    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     reconstructed_tree = reconstruct_tree(*config_args)
     reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
     plan = (
@@ -337,10 +337,10 @@ def test_reconstruct_tree_independent(independent_commits, branch_anchor):
         f"b3 {c4.short_str}"
     )
     assert reconstructed_plan == plan
-    b0 = Delta([c1], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
-    b1 = Delta([c2], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
-    b2 = Delta([c3], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
-    b3 = Delta([c4], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b0 = Delta([c1], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b1 = Delta([c2], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b2 = Delta([c3], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b3 = Delta([c4], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
     assert reconstructed_tree == {
         b0.branch_name: b0,
         b1.branch_name: b1,
@@ -448,13 +448,13 @@ def test_reconstruct_tree_branch_label_first(commit, create_branch):
     b1 {c3.sha} {c3.short_message}
     b2@b {c4.sha} {c4.short_message}
     """
-    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     tree = parse_plan(plan, *config_args)
     write_plan(tree)
     reconstructed_tree = reconstruct_tree(*config_args)
-    b = Delta([c1, c2], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
-    b1 = Delta([c3], None, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
-    b2 = Delta([c4], b, BRANCH_ANCHOR, UPSTREAM, BRANCH_TEMPLATE)
+    b = Delta([c1, c2], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b1 = Delta([c3], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b2 = Delta([c4], b, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
     assert reconstructed_tree == {
         c1.get_branch_name(BRANCH_TEMPLATE): b,
         c3.get_branch_name(BRANCH_TEMPLATE): b1,
@@ -465,7 +465,7 @@ def test_reconstruct_tree_branch_label_first(commit, create_branch):
 def test_build_empty_tree(
     commit_b, upstream, commit_a, commit_c, local, git_repository
 ):
-    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     tree = reconstruct_tree(*config_args)
     assert tree == {}
 
@@ -475,6 +475,6 @@ def test_empty_tree__git(create_branch, commit, git_repository):
     create_branch(UPSTREAM)
     commit(dict(b="b"), "b")
     create_branch(LOCAL)
-    config_args = [LOCAL, UPSTREAM, BRANCH_ANCHOR, BRANCH_TEMPLATE]
+    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     tree = reconstruct_tree(*config_args)
     assert tree == {}

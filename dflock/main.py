@@ -667,6 +667,7 @@ def cli():
     help="Use Gitlab-specific push-options to create a merge request",
 )
 def push(delta_references, remote, write, interactive, gitlab_merge_request):
+    """Push deltas to the remote."""
     tree = reconstruct_tree()
     if write:
         try:
@@ -713,8 +714,8 @@ def push(delta_references, remote, write, interactive, gitlab_merge_request):
     type=bool,
     help="Render a visual representation of the plan",
 )
-def show(verbose, visual):
-    """Display the current plan."""
+def deltas(verbose, visual):
+    """Display deltas."""
     if verbose:
         click.echo(f"upstream: {UPSTREAM}")
         click.echo(f"local: {LOCAL}\n")
@@ -832,7 +833,7 @@ def log():
 @inside_work_tree
 @click.argument("delta-reference", type=str)
 def checkout(delta_reference):
-    """Checkout DELTA_REFERENCE.
+    """Checkout deltas or the local branch.
 
     If DELTA_REFERENCE is "local" or the name of your local branch, checkout
     your local branch.
@@ -858,6 +859,7 @@ def checkout(delta_reference):
 @no_hot_branch
 @clean_work_tree
 def write():
+    """Update deltas based on the current plan."""
     tree = reconstruct_tree()
     try:
         with utils.return_to_head():
@@ -882,11 +884,11 @@ def write():
     type=bool,
     help="Print target of each branch",
 )
-def branches(commits: bool, show_targets: bool):
-    """List active branches.
+def delta_branches(commits: bool, show_targets: bool):
+    """List delta branches.
 
-    For all commits between origin/develop and the tip of local develop
-    find, feature branches with a branch name derived from that commit.
+    For all commits between upstream and local, find delta branches with a
+    branch name derived from that commit.
     """
     branches = get_delta_branches()
     if show_targets or commits:
@@ -914,7 +916,9 @@ def branches(commits: bool, show_targets: bool):
     help="Do not ask for confirmation."
 )
 def reset(yes):
-    """Remove dflock-managed branches."""
+    """Reset the plan.
+
+    This removes all dflock-managed branches."""
     branches = get_delta_branches()
     if len(branches) == 0:
         click.echo("No active branches found")

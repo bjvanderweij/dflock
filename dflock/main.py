@@ -65,10 +65,7 @@ def inside_work_tree(f):
 def no_hot_branch(f) -> typing.Callable:
     @functools.wraps(f)
     def wrapper(app, *args, **kwargs):
-        upstream = get_upstream_name(app.upstream, app.remote)
-        if utils.get_current_branch() in _get_hot_branches(
-            app.local, upstream, app.branch_template
-        ):
+        if utils.get_current_branch() in app.get_hot_branches():
             raise click.ClickException(
                 "please switch to a branch not managed by dflock before "
                 "continuing"
@@ -282,7 +279,7 @@ class App:
         If stack is False, treat every commit as an independent delta,
         otherwise create a stack of deltas.
         """
-        commits = get_local_commits(self.local, self.upstream)
+        commits = self._get_local_commits()
         tree: dict[str, Delta] = {}
         target = None
         for commit in commits:
@@ -328,7 +325,7 @@ class App:
             If not, preceding commit must be
         record the final commit in the branch
         """
-        commits = get_local_commits(self.local, self.upstream)
+        commits = self._get_local_commits()
         commits_by_message = {c.message: c for c in commits}
         local_branches = utils.get_local_branches()
         root = get_last_upstream_commit(self.upstream)
@@ -346,6 +343,70 @@ class App:
         tokens = _tokenize_plan(plan)
         commit_lists = self._make_commit_lists(tokens)
         return self._build_tree(commit_lists)
+
+    def render_plan(self, tree: dict[str, Delta]) -> str:
+        local_commits = self._get_local_commits()
+        sorted_deltas = list(
+            sorted(
+                tree.values(), key=lambda d: local_commits.index(d.commits[0])
+            )
+        )
+        lines = []
+        for commit in local_commits:
+            command = "s"
+            delta = None
+            try:
+                d_i, delta = next(
+                    (i, d) for i, d in enumerate(sorted_deltas)
+                    if commit in d.commits
+                )
+            except StopIteration:
+                pass
+            if delta is not None:
+                command = f"b{d_i}"
+                if delta.target is not None:
+                    target_i = sorted_deltas.index(delta.target)
+                    command += f"@b{target_i}"
+            lines.append(f"{command} {commit.short_str}")
+        return "\n".join(lines)
+
+    def prune_local_branches(self, tree: dict[str, Delta]) -> None:
+        hot_branches = self.get_hot_branches()
+        branches_to_prune = hot_branches - set(tree.keys())
+        for branch_name in branches_to_prune:
+            click.echo(f"pruning {branch_name}")
+            utils.run("branch", "-D", branch_name)
+
+    def get_delta_branches(self) -> list[str]:
+        branches = utils.get_local_branches()
+        commits = self._get_local_commits()
+        return [
+            c.get_branch_name(self.branch_template) for c in commits
+            if c.get_branch_name(self.branch_template) in branches
+        ]
+
+    def get_hot_branches(self) -> set[str]:
+        commits = self._get_local_commits()
+        local_branches = utils.get_local_branches()
+        return (
+            set(local_branches)
+            & set(c.get_branch_name(self.branch_template) for c in commits)
+        )
+
+    def _get_local_commits(self) -> list[Commit]:
+        """Return all commits between upstream and local."""
+        if not utils.object_exists(self.upstream_name):
+            raise click.ClickException(
+                f"Upstream {self.upstream_name} does not exist"
+            )
+        if not utils.object_exists(self.local):
+            raise click.ClickException(f"Local {self.local} does not exist")
+        commits = get_commits_between(self.upstream_name, self.local)
+        if len(commits) != len(set(c.message for c in commits)):
+            raise click.ClickException(
+                "Duplicate commit messages found in local commits."
+            )
+        return commits
 
     def _infer_delta_last_commit(
         self,
@@ -446,7 +507,7 @@ class App:
     ) -> list["_CommitList"]:
         """Build lists of contiguous commits belonging to a branch."""
         branches: list[_CommitList] = []
-        local_commits = iter(get_local_commits(self.local, self.upstream))
+        local_commits = iter(self._get_local_commits())
         for bc in branch_commands:
             if len(branches) == 0 or bc.label != branches[-1].label:
                 branches.append(_CommitList(bc.label, None, []))
@@ -552,15 +613,6 @@ def resolve_delta(name: str, branches: list[str]) -> str:
     raise ValueError(f"Could not match {name} to a unique branch")
 
 
-def get_delta_branches(local, upstream, branch_template) -> list[str]:
-    branches = utils.get_local_branches()
-    commits = get_local_commits(local, upstream)
-    return [
-        c.get_branch_name(branch_template) for c in commits
-        if c.get_branch_name(branch_template) in branches
-    ]
-
-
 def get_last_upstream_commit(upstream) -> Commit:
     return get_commits(upstream)[0]
 
@@ -623,48 +675,6 @@ def iterate_plan(plan: str):
         yield line
 
 
-def render_plan(tree: dict[str, Delta], local: str, upstream: str) -> str:
-    local_commits = get_local_commits(local, upstream)
-    sorted_deltas = list(
-        sorted(tree.values(), key=lambda d: local_commits.index(d.commits[0]))
-    )
-    lines = []
-    for commit in local_commits:
-        command = "s"
-        delta = None
-        try:
-            d_i, delta = next(
-                (i, d) for i, d in enumerate(sorted_deltas)
-                if commit in d.commits
-            )
-        except StopIteration:
-            pass
-        if delta is not None:
-            command = f"b{d_i}"
-            if delta.target is not None:
-                target_i = sorted_deltas.index(delta.target)
-                command += f"@b{target_i}"
-        lines.append(f"{command} {commit.short_str}")
-    return "\n".join(lines)
-
-
-def _get_hot_branches(local, upstream, branch_template) -> set[str]:
-    commits = get_local_commits(local, upstream)
-    local_branches = utils.get_local_branches()
-    return (
-        set(local_branches)
-        & set(c.get_branch_name(branch_template) for c in commits)
-    )
-
-
-def prune_local_branches(tree, local, upstream, branch_template) -> None:
-    hot_branches = _get_hot_branches(local, upstream, branch_template)
-    branches_to_prune = hot_branches - set(tree.keys())
-    for branch_name in branches_to_prune:
-        click.echo(f"pruning {branch_name}")
-        utils.run("branch", "-D", branch_name)
-
-
 def get_remote_tracking_branch(branch) -> str:
     return utils.run(
         "for-each-ref", "--format=%(upstream:short)", f"refs/heads/{branch}"
@@ -703,20 +713,6 @@ def get_commits(commits: str, number: None | int = None) -> list[Commit]:
 def get_last_n_commits(rev, n) -> list[Commit]:
     """Return at most n commits leading up to rev, including rev."""
     return get_commits(rev, number=n)
-
-
-def get_local_commits(local, upstream) -> list[Commit]:
-    """Return all commits between upstream and local."""
-    if not utils.object_exists(upstream):
-        raise click.ClickException(f"Upstream {upstream} does not exist")
-    if not utils.object_exists(local):
-        raise click.ClickException(f"Local {local} does not exist")
-    commits = get_commits_between(upstream, local)
-    if len(commits) != len(set(c.message for c in commits)):
-        raise click.ClickException(
-            "Duplicate commit messages found in local commits."
-        )
-    return commits
 
 
 def edit_interactively(contents: str, editor: str) -> str:
@@ -905,7 +901,7 @@ def plan(app, strategy, edit, show) -> None:
         tree = app.reconstruct_tree()
     else:
         raise ValueError("This shouldn't happen")
-    plan = render_plan(tree, app.local, app.upstream_name)
+    plan = app.render_plan(tree)
     if (edit or strategy == "detect") and not show:
         new_plan = edit_interactively(plan + INSTRUCTIONS, app.editor)
         new_plan = "\n".join(iterate_plan(new_plan))
@@ -923,7 +919,7 @@ def plan(app, strategy, edit, show) -> None:
             click.echo(
                 "Branches updated. Run `dfl push` to push them to a remote."
             )
-            prune_local_branches(tree, app.local, app.upstream_name, app.branch_template)
+            app.prune_local_branches(tree)
         except ParsingError as exc:
             raise click.ClickException(str(exc))
         except (PlanError, CherryPickFailed) as exc:
@@ -948,7 +944,7 @@ def status(app, show_targets) -> None:
     if not utils.object_exists(app.local):
         raise click.ClickException(f"Local {app.local} does not exist")
     diverged = utils.have_diverged(app.upstream_name, app.local)
-    branches = get_delta_branches(app.local, app.upstream_name, app.branch_template)
+    branches = app.get_delta_branches()
     on_local = utils.get_current_branch() == app.local
     if on_local:
         click.echo("On local branch.")
@@ -1033,7 +1029,7 @@ def checkout(app, delta_reference) -> None:
     if delta_reference in ["local", app.local]:
         branch = app.local
     else:
-        branches = get_delta_branches(app.local, app.upstream_name, app.branch_template)
+        branches = app.get_delta_branches()
         try:
             branch = resolve_delta(delta_reference, branches)
         except ValueError as exc:
@@ -1073,8 +1069,7 @@ def reset(app, yes) -> None:
 
     This removes all dflock-managed branches.
     """
-    upstream = get_upstream_name(app.upstream, app.remote)
-    branches = get_delta_branches(app.local, upstream, app.branch_template)
+    branches = app.get_delta_branches()
     if len(branches) == 0:
         click.echo("No active branches found")
         return

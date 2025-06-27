@@ -178,10 +178,9 @@ def test_parse_plan__illegal_plans(app, local_commits):
 @pytest.mark.parametrize("anchor_commit", ["first", "last"])
 def test_parse_plan__legal_plans(app, local_commits, anchor_commit):
     app.anchor_commit = anchor_commit
-    config_args = [anchor_commit, UPSTREAM, BRANCH_TEMPLATE]
     a, b, c, d = local_commits
     # Equivalent plans
-    delta = Delta([c], None, *config_args)
+    delta = app._create_delta([c], None)
     tree = {delta.branch_name: delta}
     v0 = app.parse_plan("s 0 a\ns 1 b\nb0 2 v")
     v1 = app.parse_plan("s 0 a\nb0 2 v")
@@ -193,20 +192,20 @@ def test_parse_plan__legal_plans(app, local_commits, anchor_commit):
     assert app.parse_plan("") == {}
     assert app.parse_plan("s 0 a\ns 1 b\ns 2 v") == {}
     # Optional target specifications
-    b0 = Delta([a], None, *config_args)
-    b1 = Delta([b, c], b0, *config_args)
+    b0 = app._create_delta([a], None)
+    b1 = app._create_delta([b, c], b0)
     tree = {d.branch_name: d for d in [b0, b1]}
     variant_1 = app.parse_plan("b 0 a\nb1@b 1 b\nb1 2 v")
     variant_2 = app.parse_plan("b 0 a\nb1 1 b\nb1@b 2 v")
     variant_3 = app.parse_plan("b 0 a\nb1@b 1 b\nb1@b 2 v")
     variant_4 = app.parse_plan("b 0 a\nb1@ 1 b\nb1@b 2 v")
     assert tree == variant_1 == variant_2 == variant_3 == variant_4
-    b0 = Delta([a, c], None, *config_args)
+    b0 = app._create_delta([a, c], None)
     tree = {b0.branch_name: b0}
     assert app.parse_plan("b 0 a\ns 1 foo\nb 2 v") == tree
-    b0 = Delta([a], None, *config_args)
-    b1 = Delta([b], b0, *config_args)
-    b2 = Delta([c], b1, *config_args)
+    b0 = app._create_delta([a], None)
+    b1 = app._create_delta([b], b0)
+    b2 = app._create_delta([c], b1)
     tree = {d.branch_name: d for d in [b0, b1, b2]}
     variant_1 = app.parse_plan("b0 0 a\nb1@b0 1 foo\nb2@b1 2 v")
     variant_2 = app.parse_plan("b 0 a\nb1@b 1 foo\nb2@1 2 v")
@@ -263,20 +262,20 @@ def test_reconstruct_tree__anchor_commit(app, anchor_commit, dag_commits):
     tree = app.parse_plan(plan)
     write_plan(tree)
     reconstructed_tree = app.reconstruct_tree()
-    b = Delta([c1, c2], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
-    b1 = Delta([c3], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
-    b2 = Delta([c4], b, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
+    b = app._create_delta([c1, c2], None)
+    b1 = app._create_delta([c3], None)
+    b2 = app._create_delta([c4], b)
     if anchor_commit == "first":
         assert reconstructed_tree == {
-            c1.get_branch_name(BRANCH_TEMPLATE): b,
-            c3.get_branch_name(BRANCH_TEMPLATE): b1,
-            c4.get_branch_name(BRANCH_TEMPLATE): b2,
+            app.get_commit_branch_name(c1): b,
+            app.get_commit_branch_name(c3): b1,
+            app.get_commit_branch_name(c4): b2,
         }
     else:
         assert reconstructed_tree == {
-            c2.get_branch_name(BRANCH_TEMPLATE): b,
-            c3.get_branch_name(BRANCH_TEMPLATE): b1,
-            c4.get_branch_name(BRANCH_TEMPLATE): b2,
+            app.get_commit_branch_name(c2): b,
+            app.get_commit_branch_name(c3): b1,
+            app.get_commit_branch_name(c4): b2,
         }
 
 
@@ -294,9 +293,9 @@ def test_reconstruct_tree(app, dag_commits, anchor_commit):
     reconstructed_tree = app.reconstruct_tree()
     reconstructed_plan = app.render_plan(reconstructed_tree)
     assert reconstructed_plan == plan
-    b0 = Delta([c1, c2], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
-    b1 = Delta([c3], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
-    b2 = Delta([c4], b0, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b0 = app._create_delta([c1, c2], None)
+    b1 = app._create_delta([c3], None)
+    b2 = app._create_delta([c4], b0)
     assert reconstructed_tree == {
         b0.branch_name: b0,
         b1.branch_name: b1,
@@ -318,10 +317,10 @@ def test_reconstruct_tree_stacked(app, serially_dependent_commits, anchor_commit
         f"b3@b2 {c4.short_str}"
     )
     assert reconstructed_plan == plan
-    b0 = Delta([c1], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
-    b1 = Delta([c2], b0, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
-    b2 = Delta([c3], b1, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
-    b3 = Delta([c4], b2, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b0 = app._create_delta([c1], None)
+    b1 = app._create_delta([c2], b0)
+    b2 = app._create_delta([c3], b1)
+    b3 = app._create_delta([c4], b2)
     assert reconstructed_tree == {
         b0.branch_name: b0,
         b1.branch_name: b1,
@@ -360,10 +359,10 @@ def test_reconstruct_tree_independent(app, independent_commits, anchor_commit):
         f"b3 {c4.short_str}"
     )
     assert reconstructed_plan == plan
-    b0 = Delta([c1], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
-    b1 = Delta([c2], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
-    b2 = Delta([c3], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
-    b3 = Delta([c4], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
+    b0 = app._create_delta([c1], None)
+    b1 = app._create_delta([c2], None)
+    b2 = app._create_delta([c3], None)
+    b3 = app._create_delta([c4], None)
     assert reconstructed_tree == {
         b0.branch_name: b0,
         b1.branch_name: b1,
@@ -468,13 +467,13 @@ def test_reconstruct_tree_branch_label_first(app, commit, create_branch):
     tree = app.parse_plan(plan)
     write_plan(tree)
     reconstructed_tree = app.reconstruct_tree()
-    b = Delta([c1, c2], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
-    b1 = Delta([c3], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
-    b2 = Delta([c4], b, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
+    b = app._create_delta([c1, c2], None)
+    b1 = app._create_delta([c3], None)
+    b2 = app._create_delta([c4], b)
     assert reconstructed_tree == {
-        c1.get_branch_name(BRANCH_TEMPLATE): b,
-        c3.get_branch_name(BRANCH_TEMPLATE): b1,
-        c4.get_branch_name(BRANCH_TEMPLATE): b2,
+        app.get_commit_branch_name(c1): b,
+        app.get_commit_branch_name(c3): b1,
+        app.get_commit_branch_name(c4): b2,
     }
 
 
@@ -514,27 +513,29 @@ def test_status__not_on_local(runner, commit, create_branch, git_repository):
     assert "NOT on local branch" in result.output
 
 
-def test_status__show_branches(runner, commit, create_branch, git_repository):
+def test_status__show_branches(app, runner, commit, create_branch, git_repository):
     commit(dict(a="a"), "a")
     create_branch(UPSTREAM)
     sha = commit(dict(b="b"), "b")
     c0 = Commit(sha, "b")
-    create_branch(c0.get_branch_name(BRANCH_TEMPLATE))
+    branch_name = app.get_commit_branch_name(c0)
+    create_branch(branch_name)
     create_branch(LOCAL)
     result = runner.invoke(cli_group, ["status"])
     assert result.exit_code == 0
     assert "Deltas:" in result.output
-    assert c0.get_branch_name(BRANCH_TEMPLATE) in result.output
+    assert branch_name in result.output
 
 
-def test_status__show_branches_with_targets(runner, commit, create_branch, git_repository):
+def test_status__show_branches_with_targets(app, runner, commit, create_branch, git_repository):
     commit(dict(a="a"), "a")
     create_branch(UPSTREAM)
     sha = commit(dict(b="b"), "b")
     c0 = Commit(sha, "b")
-    create_branch(c0.get_branch_name(BRANCH_TEMPLATE))
+    branch_name = app.get_commit_branch_name(c0)
+    create_branch(branch_name)
     create_branch(LOCAL)
     result = runner.invoke(cli_group, ["status", "--show-targets"])
     assert result.exit_code == 0
     assert "Deltas:" in result.output
-    assert c0.get_branch_name(BRANCH_TEMPLATE) in result.output
+    assert branch_name in result.output

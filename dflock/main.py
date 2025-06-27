@@ -158,37 +158,16 @@ class Commit(typing.NamedTuple):
     def short_str(self):
         return f"{self.sha[:8]} {self.short_message}"
 
-    def get_branch_name(self, branch_template) -> str:
-        uniqueish = md5(self.message.encode()).hexdigest()[:8]
-        words = re.findall(r"\w+", self.message.lower())
-        readable = '-'.join(words)
-        return branch_template.format(f"{readable}-{uniqueish}")
-
 
 class Delta(typing.NamedTuple):
     commits: list[Commit]
     target: typing.Optional["Delta"]
-    anchor_commit: str
-    upstream: str
-    branch_template: str
-
-    @property
-    def branch_name(self) -> str:
-        if self.anchor_commit == "first":
-            return self.commits[0].get_branch_name(self.branch_template)
-        else:
-            return self.commits[-1].get_branch_name(self.branch_template)
+    branch_name: str
+    target_branch_name: str
 
     @property
     def full_branch_name(self) -> str:
         return f"refs/heads/{self.branch_name}"
-
-    @property
-    def target_branch_name(self) -> str:
-        if self.target is None:
-            return self.upstream
-        else:
-            return self.target.branch_name
 
     def branch_exists(self) -> bool:
         return utils.object_exists(self.full_branch_name)
@@ -272,6 +251,25 @@ class App:
             return self.upstream
         return f"{self.remote}/{self.upstream}"
 
+    def get_commit_branch_name(self, commit):
+        uniqueish = md5(commit.message.encode()).hexdigest()[:8]
+        words = re.findall(r"\w+", commit.message.lower())
+        readable = '-'.join(words)
+        return self.branch_template.format(f"{readable}-{uniqueish}")
+
+    def _create_delta(
+        self, commits: typing.Sequence[Commit], target: None | Delta
+    ) -> Delta:
+        commits = list(commits)
+        branch_name = (
+            self.get_commit_branch_name(commits[0]) if self.anchor_commit == "first"
+            else self.get_commit_branch_name(commits[-1])
+        )
+        target_branch_name = (
+            self.upstream_name if target is None else target.branch_name
+        )
+        return Delta(commits, target, branch_name, target_branch_name)
+
     def build_tree(self, stack: bool = True) -> dict[str, "Delta"]:
         """Create a simple plan including all local commits.
 
@@ -282,13 +280,7 @@ class App:
         tree: dict[str, Delta] = {}
         target = None
         for commit in commits:
-            delta = Delta(
-                [commit],
-                target,
-                self.anchor_commit,
-                self.upstream,
-                self.branch_template
-            )
+            delta = self._create_delta([commit], target)
             tree[delta.branch_name] = delta
             if stack:
                 target = delta
@@ -327,10 +319,10 @@ class App:
         commits = self._get_local_commits()
         commits_by_message = {c.message: c for c in commits}
         local_branches = utils.get_local_branches()
-        root = get_last_upstream_commit(self.upstream)
+        root = get_commits(self.upstream)[0]
         tree: dict[str, Delta] = {}
         for i, commit in enumerate(commits):
-            if commit.get_branch_name(self.branch_template) in local_branches:
+            if self.get_commit_branch_name(commit) in local_branches:
                 if self.anchor_commit == "first":
                     delta = self._infer_delta_first_commit(commit, i, commits_by_message, tree, root)
                 else:
@@ -380,8 +372,8 @@ class App:
         branches = utils.get_local_branches()
         commits = self._get_local_commits()
         return [
-            c.get_branch_name(self.branch_template) for c in commits
-            if c.get_branch_name(self.branch_template) in branches
+            self.get_commit_branch_name(c) for c in commits
+            if self.get_commit_branch_name(c) in branches
         ]
 
     def get_hot_branches(self) -> set[str]:
@@ -389,7 +381,7 @@ class App:
         local_branches = utils.get_local_branches()
         return (
             set(local_branches)
-            & set(c.get_branch_name(self.branch_template) for c in commits)
+            & set(self.get_commit_branch_name(c) for c in commits)
         )
 
     def _get_local_commits(self) -> list[Commit]:
@@ -416,15 +408,15 @@ class App:
         root: Commit,
     ) -> Delta:
         candidate_commits = get_last_n_commits(
-            commit.get_branch_name(self.branch_template), i + 1
+            self.get_commit_branch_name(commit), i + 1
         )
         if (
-            candidate_commits[-1].get_branch_name(self.branch_template)
-            != commit.get_branch_name(self.branch_template)
+            self.get_commit_branch_name(candidate_commits[-1])
+            != self.get_commit_branch_name(commit)
         ):
             raise click.ClickException(
                 "Invalid state: dflock-managed branch name "
-                f"{commit.get_branch_name(self.branch_template)} does not match branch "
+                f"{self.get_commit_branch_name(commit)} does not match branch "
                 "name expected based on its last commit.\n\nRun\n\ngit branch "
                 "-D {commit.branch_name(self.branch_template)}\n\nto remove the "
                 "offending branch. Or run\n\ndfl reset\n\nif you'd like to start "
@@ -435,15 +427,15 @@ class App:
         # Find the first commit of the branch by iterating through
         # preceding commits in reverse order
         for cc in reversed(candidate_commits):
-            branch_name = cc.get_branch_name(self.branch_template)
+            branch_name = self.get_commit_branch_name(cc)
             # When finding a commit whose branch name corresponds to
             # a branch in the tree and it isn't the current commits branch
             # name assume we've found the target branch and stop
             if (
                 branch_name in tree
-                and (branch_name != commit.get_branch_name(self.branch_template))
+                and (branch_name != self.get_commit_branch_name(commit))
             ):
-                target = tree[cc.get_branch_name(self.branch_template)]
+                target = tree[self.get_commit_branch_name(cc)]
                 break
             # if we find a commit that is in the commits by message
             elif cc.message in commits_by_message:
@@ -461,7 +453,7 @@ class App:
                         + cc.short_message
                     )
                 break
-        return Delta(commits, target, self.anchor_commit, self.upstream, self.branch_template)
+        return self._create_delta(commits, target)
 
     def _infer_delta_first_commit(
         self,
@@ -473,14 +465,14 @@ class App:
     ) -> Delta:
         n_local = len(commits_by_message)
         candidate_commits = get_last_n_commits(
-            commit.get_branch_name(self.branch_template), n_local - i + 1
+            self.get_commit_branch_name(commit), n_local - i + 1
         )
         target = None
         branch_commits: list[Commit] = []
         start_index = [
-            c.get_branch_name(self.branch_template) for c in candidate_commits
+            self.get_commit_branch_name(c) for c in candidate_commits
         ].index(
-            commit.get_branch_name(self.branch_template)
+            self.get_commit_branch_name(commit)
         )
         for delta in tree.values():
             if (
@@ -497,9 +489,7 @@ class App:
                     f"warning: unknown commit message encountered: {cc.message}"
                 )
                 break
-        return Delta(
-            branch_commits, target, self.anchor_commit, self.upstream, self.branch_template
-        )
+        return self._create_delta(branch_commits, target)
 
     def _make_commit_lists(
         self, branch_commands: typing.Iterable["_BranchCommand"],
@@ -559,13 +549,7 @@ class App:
                 last_target_label = d.target_label
                 valid_target_labels = {last_target_label}
             valid_target_labels.add(d.label)
-            deltas[d.label] = Delta(
-                d.commits,
-                target_branch,
-                self.anchor_commit,
-                self.upstream,
-                self.branch_template
-            )
+            deltas[d.label] = self._create_delta(d.commits, target_branch)
         return {b.branch_name: b for b in deltas.values()}
 
 
@@ -610,10 +594,6 @@ def resolve_delta(name: str, branches: list[str]) -> str:
     if len(matching_branches) == 1:
         return matching_branches[0]
     raise ValueError(f"Could not match {name} to a unique branch")
-
-
-def get_last_upstream_commit(upstream) -> Commit:
-    return get_commits(upstream)[0]
 
 
 def write_plan(tree: dict[str, Delta]):

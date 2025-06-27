@@ -7,8 +7,7 @@ import pytest
 from dflock import utils
 from dflock.main import (
     cli_group, Delta, Commit, ParsingError, PlanError,
-    write_plan, get_local_commits, render_plan,
-    read_config, App
+    write_plan, read_config, App
 )
 
 UPSTREAM = "upstream"
@@ -114,7 +113,7 @@ def local_commits():
     commits = [
         Commit("0", "a"), Commit("1", "b"), Commit("2", "c"), Commit("3", "d")
     ]
-    with patch("dflock.main.get_local_commits", return_value=commits):
+    with patch("dflock.main.App._get_local_commits", return_value=commits):
         yield commits
 
 
@@ -216,7 +215,7 @@ def test_parse_plan__legal_plans(app, local_commits, anchor_commit):
 
 
 @pytest.fixture
-def independent_commits(commit, create_branch):
+def independent_commits(app, commit, create_branch):
     commit(dict(x="x"), "0")
     create_branch(UPSTREAM)
     commit(dict(a="a"), "1")
@@ -224,11 +223,11 @@ def independent_commits(commit, create_branch):
     commit(dict(c="c"), "3")
     commit(dict(d="d"), "4")
     create_branch(LOCAL)
-    return get_local_commits(LOCAL, UPSTREAM)
+    return app._get_local_commits()
 
 
 @pytest.fixture
-def serially_dependent_commits(commit, create_branch):
+def serially_dependent_commits(app, commit, create_branch):
     commit(dict(a="a"), "0")
     create_branch(UPSTREAM)
     commit(dict(a="b"), "1")
@@ -236,11 +235,11 @@ def serially_dependent_commits(commit, create_branch):
     commit(dict(a="d"), "3")
     commit(dict(a="e"), "4")
     create_branch(LOCAL)
-    return get_local_commits(LOCAL, UPSTREAM)
+    return app._get_local_commits()
 
 
 @pytest.fixture
-def dag_commits(commit, create_branch):
+def dag_commits(app, commit, create_branch):
     commit(dict(a="a"), "0")
     create_branch(UPSTREAM)
     commit(dict(a="b"), "1")
@@ -248,7 +247,7 @@ def dag_commits(commit, create_branch):
     commit(dict(b="a"), "3")
     commit(dict(a="d"), "4")
     create_branch(LOCAL)
-    return get_local_commits(LOCAL, UPSTREAM)
+    return app._get_local_commits()
 
 
 @pytest.mark.parametrize("anchor_commit", ["first", "last"])
@@ -293,7 +292,7 @@ def test_reconstruct_tree(app, dag_commits, anchor_commit):
     tree = app.parse_plan(plan)
     write_plan(tree)
     reconstructed_tree = app.reconstruct_tree()
-    reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
+    reconstructed_plan = app.render_plan(reconstructed_tree)
     assert reconstructed_plan == plan
     b0 = Delta([c1, c2], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
     b1 = Delta([c3], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)
@@ -311,7 +310,7 @@ def test_reconstruct_tree_stacked(app, serially_dependent_commits, anchor_commit
     tree = app.build_tree(stack=True)
     write_plan(tree)
     reconstructed_tree = app.reconstruct_tree()
-    reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
+    reconstructed_plan = app.render_plan(reconstructed_tree)
     plan = (
         f"b0 {c1.short_str}\n"
         f"b1@b0 {c2.short_str}\n"
@@ -353,7 +352,7 @@ def test_reconstruct_tree_independent(app, independent_commits, anchor_commit):
     tree = app.build_tree(stack=False)
     write_plan(tree)
     reconstructed_tree = app.reconstruct_tree()
-    reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
+    reconstructed_plan = app.render_plan(reconstructed_tree)
     plan = (
         f"b0 {c1.short_str}\n"
         f"b1 {c2.short_str}\n"
@@ -459,7 +458,7 @@ def test_reconstruct_tree_branch_label_first(app, commit, create_branch):
     commit(dict(b="a"), "3")
     commit(dict(a="bb"), "4")
     create_branch(LOCAL)
-    c1, c2, c3, c4 = get_local_commits(LOCAL, UPSTREAM)
+    c1, c2, c3, c4 = app._get_local_commits()
     plan = f"""
     b {c1.sha} {c1.short_message}
     b {c2.sha} {c2.short_message}

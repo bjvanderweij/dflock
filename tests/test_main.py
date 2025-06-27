@@ -8,7 +8,7 @@ from dflock import utils
 from dflock.main import (
     cli_group, Delta, Commit, parse_plan, ParsingError, PlanError,
     reconstruct_tree, write_plan, get_local_commits, render_plan,
-    build_tree, read_config
+    read_config, App
 )
 
 UPSTREAM = "upstream"
@@ -32,8 +32,8 @@ def configuration(tmp_path):
         return read_config(ctx, cmd, test_config_path)
     with open(test_config_path, "w") as f:
         f.write(TEST_CONFIG)
-    with patch("dflock.main.read_config", new_read_config):
-        yield
+    with patch("dflock.main.read_config", new_read_config) as mock:
+        yield mock
 
 
 @pytest.fixture()
@@ -61,6 +61,11 @@ def upstream(git_repository):
 def local(git_repository):
     utils.run(*(f"checkout -b {LOCAL}".split()), cwd=git_repository)
     utils.run(*("checkout -".split()), cwd=git_repository)
+
+
+@pytest.fixture()
+def app(configuration):
+    return App.from_config(configuration(None, None, None)["dflock"])
 
 
 @pytest.fixture()
@@ -126,7 +131,7 @@ def checkout(git_repository):
     return _checkout
 
 
-def test_parse_plan__syntax_errors(local_commits):
+def test_parse_plan__syntax_errors(app, local_commits):
     config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     with pytest.raises(ParsingError):
         parse_plan("s 0 a\na 1 b\ns 2 v", *config_args) == {}
@@ -292,11 +297,9 @@ def test_reconstruct_tree(dag_commits, anchor_commit):
 
 
 @pytest.mark.parametrize("anchor_commit", ["first", "last"])
-def test_reconstruct_tree_stacked(serially_dependent_commits, anchor_commit):
+def test_reconstruct_tree_stacked(app, serially_dependent_commits, anchor_commit):
     c1, c2, c3, c4 = serially_dependent_commits
-    tree = build_tree(
-        LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE, stack=True
-    )
+    tree = app.build_tree(stack=True)
     write_plan(tree)
     config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     reconstructed_tree = reconstruct_tree(*config_args)
@@ -331,11 +334,10 @@ def test_plan__not_a_git_repo(runner):
 
 
 @pytest.mark.parametrize("anchor_commit", ["first", "last"])
-def test_reconstruct_tree_independent(independent_commits, anchor_commit):
+def test_reconstruct_tree_independent(app, independent_commits, anchor_commit):
     c1, c2, c3, c4 = independent_commits
-    tree = build_tree(
-        LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE, stack=False
-    )
+    app.anchor_commit = anchor_commit
+    tree = app.build_tree(stack=False)
     write_plan(tree)
     config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     reconstructed_tree = reconstruct_tree(*config_args)

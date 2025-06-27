@@ -1,18 +1,18 @@
+import configparser
 import functools
-import typing
+import re
 import subprocess
 import tempfile
-import re
-import configparser
+import typing
 from dataclasses import dataclass
-from pathlib import Path
-from hashlib import md5
 from graphlib import TopologicalSorter
+from hashlib import md5
+from pathlib import Path
 
-import graphviz
 import click
-from dflock import utils
+import graphviz
 
+from dflock import utils
 
 DEFAULT_UPSTREAM = "main"
 DEFAULT_LOCAL = "main"
@@ -67,8 +67,7 @@ def no_hot_branch(f) -> typing.Callable:
     def wrapper(app, *args, **kwargs):
         if utils.get_current_branch() in app.get_hot_branches():
             raise click.ClickException(
-                "please switch to a branch not managed by dflock before "
-                "continuing"
+                "please switch to a branch not managed by dflock before " "continuing"
             )
         return f(app, *args, **kwargs)
 
@@ -84,9 +83,7 @@ def undiverged(f):
                 f"`git pull --rebase {app.remote} {app.upstream}` to pull "
                 "upstream changes into your local branch."
             )
-            raise click.ClickException(
-                "Your local and upstream have diverged."
-            )
+            raise click.ClickException("Your local and upstream have diverged.")
         return f(app, *args, **kwargs)
 
     return wrapper
@@ -152,7 +149,7 @@ class Commit(typing.NamedTuple):
 
     @property
     def short_message(self):
-        return self.message.split('\n')[0]
+        return self.message.split("\n")[0]
 
     @property
     def short_str(self):
@@ -195,8 +192,7 @@ class Delta(typing.NamedTuple):
                 f"commands:\n\n{self.create_instructions}"
             )
             raise CherryPickFailed(
-                f"Cherry-pick failed at branch {self.branch_name}.",
-                hints=[hint]
+                f"Cherry-pick failed at branch {self.branch_name}.", hints=[hint]
             )
 
     def get_force_push_command(
@@ -219,9 +215,8 @@ class Delta(typing.NamedTuple):
         return command
 
     def __str__(self) -> str:
-        return (
-            "Branch {self.branch_name} with commits:"
-            "\n".join(f"\t{c.short_message}" for c in self.commits)
+        return "Branch {self.branch_name} with commits:" "\n".join(
+            f"\t{c.short_message}" for c in self.commits
         )
 
 
@@ -266,7 +261,7 @@ class App:
     def get_commit_branch_name(self, commit):
         uniqueish = md5(commit.message.encode()).hexdigest()[:8]
         words = re.findall(r"\w+", commit.message.lower())
-        readable = '-'.join(words)
+        readable = "-".join(words)
         return self.branch_template.format(f"{readable}-{uniqueish}")
 
     def _create_delta(
@@ -274,7 +269,8 @@ class App:
     ) -> Delta:
         commits = list(commits)
         branch_name = (
-            self.get_commit_branch_name(commits[0]) if self.anchor_commit == "first"
+            self.get_commit_branch_name(commits[0])
+            if self.anchor_commit == "first"
             else self.get_commit_branch_name(commits[-1])
         )
         target_branch_name = (
@@ -336,9 +332,13 @@ class App:
         for i, commit in enumerate(commits):
             if self.get_commit_branch_name(commit) in local_branches:
                 if self.anchor_commit == "first":
-                    delta = self._infer_delta_first_commit(commit, i, commits_by_message, tree, root)
+                    delta = self._infer_delta_first_commit(
+                        commit, i, commits_by_message, tree, root
+                    )
                 else:
-                    delta = self._infer_delta_last_commit(commit, i, commits_by_message, tree, root)
+                    delta = self._infer_delta_last_commit(
+                        commit, i, commits_by_message, tree, root
+                    )
                 tree[delta.branch_name] = delta
         return tree
 
@@ -350,9 +350,7 @@ class App:
     def render_plan(self, tree: dict[str, Delta]) -> str:
         local_commits = self._get_local_commits()
         sorted_deltas = list(
-            sorted(
-                tree.values(), key=lambda d: local_commits.index(d.commits[0])
-            )
+            sorted(tree.values(), key=lambda d: local_commits.index(d.commits[0]))
         )
         lines = []
         for commit in local_commits:
@@ -360,8 +358,7 @@ class App:
             delta = None
             try:
                 d_i, delta = next(
-                    (i, d) for i, d in enumerate(sorted_deltas)
-                    if commit in d.commits
+                    (i, d) for i, d in enumerate(sorted_deltas) if commit in d.commits
                 )
             except StopIteration:
                 pass
@@ -384,24 +381,22 @@ class App:
         branches = utils.get_local_branches()
         commits = self._get_local_commits()
         return [
-            self.get_commit_branch_name(c) for c in commits
+            self.get_commit_branch_name(c)
+            for c in commits
             if self.get_commit_branch_name(c) in branches
         ]
 
     def get_hot_branches(self) -> set[str]:
         commits = self._get_local_commits()
         local_branches = utils.get_local_branches()
-        return (
-            set(local_branches)
-            & set(self.get_commit_branch_name(c) for c in commits)
+        return set(local_branches) & set(
+            self.get_commit_branch_name(c) for c in commits
         )
 
     def _get_local_commits(self) -> list[Commit]:
         """Return all commits between upstream and local."""
         if not utils.object_exists(self.upstream_name):
-            raise click.ClickException(
-                f"Upstream {self.upstream_name} does not exist"
-            )
+            raise click.ClickException(f"Upstream {self.upstream_name} does not exist")
         if not utils.object_exists(self.local):
             raise click.ClickException(f"Local {self.local} does not exist")
         commits = get_commits_between(self.upstream_name, self.local)
@@ -422,10 +417,9 @@ class App:
         candidate_commits = get_last_n_commits(
             self.get_commit_branch_name(commit), i + 1
         )
-        if (
-            self.get_commit_branch_name(candidate_commits[-1])
-            != self.get_commit_branch_name(commit)
-        ):
+        if self.get_commit_branch_name(
+            candidate_commits[-1]
+        ) != self.get_commit_branch_name(commit):
             raise click.ClickException(
                 "Invalid state: dflock-managed branch name "
                 f"{self.get_commit_branch_name(commit)} does not match branch "
@@ -443,17 +437,14 @@ class App:
             # When finding a commit whose branch name corresponds to
             # a branch in the tree and it isn't the current commits branch
             # name assume we've found the target branch and stop
-            if (
-                branch_name in tree
-                and (branch_name != self.get_commit_branch_name(commit))
+            if branch_name in tree and (
+                branch_name != self.get_commit_branch_name(commit)
             ):
                 target = tree[self.get_commit_branch_name(cc)]
                 break
             # if we find a commit that is in the commits by message
             elif cc.message in commits_by_message:
-                commits.insert(
-                    0, commits_by_message[cc.message]
-                )
+                commits.insert(0, commits_by_message[cc.message])
             # either we've reached the bottom of the tree, in which case
             # the preceding commits should be the same as the tip of
             # remote. If not, a commit has been renamed
@@ -481,30 +472,24 @@ class App:
         )
         target = None
         branch_commits: list[Commit] = []
-        start_index = [
-            self.get_commit_branch_name(c) for c in candidate_commits
-        ].index(
+        start_index = [self.get_commit_branch_name(c) for c in candidate_commits].index(
             self.get_commit_branch_name(commit)
         )
         for delta in tree.values():
-            if (
-                delta.commits[-1].message
-                == candidate_commits[start_index - 1].message
-            ):
+            if delta.commits[-1].message == candidate_commits[start_index - 1].message:
                 target = delta
                 break
         for cc in candidate_commits[start_index:]:
             if cc.message in commits_by_message:
                 branch_commits.append(commits_by_message[cc.message])
             else:
-                click.echo(
-                    f"warning: unknown commit message encountered: {cc.message}"
-                )
+                click.echo(f"warning: unknown commit message encountered: {cc.message}")
                 break
         return self._create_delta(branch_commits, target)
 
     def _make_commit_lists(
-        self, branch_commands: typing.Iterable[_BranchCommand],
+        self,
+        branch_commands: typing.Iterable[_BranchCommand],
     ) -> list[_CommitList]:
         """Build lists of contiguous commits belonging to a branch."""
         branches: list[_CommitList] = []
@@ -530,7 +515,8 @@ class App:
         return branches
 
     def _build_tree(
-        self, candidate_deltas: typing.Iterable[_CommitList],
+        self,
+        candidate_deltas: typing.Iterable[_CommitList],
     ) -> dict[str, Delta]:
         """Parse branching plan and return a branch DAG.
 
@@ -551,8 +537,7 @@ class App:
                     f"`git rebase --interactive {self.local} {self.upstream}`"
                 ]
                 raise PlanError(
-                    f"invalid target for \"{d.label}\": \"{d.target_label}\"",
-                    hints=hints
+                    f'invalid target for "{d.label}": "{d.target_label}"', hints=hints
                 )
             target_branch = None
             if d.target_label is not None:
@@ -664,9 +649,9 @@ def branch_up_to_date(branch):
     remote_tracking_branch = get_remote_tracking_branch(branch)
     if remote_tracking_branch == "":
         raise NoRemoteTrackingBranch()
-    return utils.run(
-        "rev-parse", remote_tracking_branch
-    ) == utils.run("rev-parse", branch)
+    return utils.run("rev-parse", remote_tracking_branch) == utils.run(
+        "rev-parse", branch
+    )
 
 
 def get_commits_between(rev_a, rev_b) -> list[Commit]:
@@ -738,7 +723,7 @@ def read_config(ctx, cmd, path):
         allow_dash=False,
         path_type=str,
     ),
-    help="Use a custom config file."
+    help="Use a custom config file.",
 )
 @click.pass_context
 def cli_group(ctx, config):
@@ -784,13 +769,7 @@ def cli():
 )
 @inside_work_tree
 @pass_app
-def push(
-    app,
-    delta_references,
-    write,
-    interactive,
-    gitlab_merge_request
-) -> None:
+def push(app, delta_references, write, interactive, gitlab_merge_request) -> None:
     """Push deltas to the remote."""
     if app.remote == "":
         raise click.ClickException("Remote must be set.")
@@ -836,7 +815,7 @@ def push(
     "--edit",
     is_flag=True,
     type=bool,
-    help="Set this flag to always edit the plan before executing it."
+    help="Set this flag to always edit the plan before executing it.",
 )
 @click.option(
     "-s",
@@ -889,9 +868,7 @@ def plan(app, strategy, edit, show) -> None:
             tree = app.parse_plan(new_plan)
             with utils.return_to_head():
                 write_plan(tree)
-            click.echo(
-                "Branches updated. Run `dfl push` to push them to a remote."
-            )
+            click.echo("Branches updated. Run `dfl push` to push them to a remote.")
             app.prune_local_branches(tree)
         except ParsingError as exc:
             raise click.ClickException(str(exc))
@@ -937,9 +914,7 @@ def status(app, show_targets) -> None:
                     f"{branch}{'' if up_to_date else ' (diverged)'}"
                 )
             except NoRemoteTrackingBranch:
-                click.echo(
-                    f"{'b' + str(i):>4}: {branch} (not pushed)"
-                )
+                click.echo(f"{'b' + str(i):>4}: {branch} (not pushed)")
             if show_targets:
                 target = tree[branch].target_branch_name
                 click.echo(f"{' ' * 6}@ {target}")
@@ -1029,12 +1004,7 @@ def write(app) -> None:
 
 
 @cli_group.command()
-@click.option(
-    '-y',
-    '--yes',
-    is_flag=True,
-    help="Do not ask for confirmation."
-)
+@click.option("-y", "--yes", is_flag=True, help="Do not ask for confirmation.")
 @click.pass_context
 @inside_work_tree
 def reset(app, yes) -> None:

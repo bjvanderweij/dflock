@@ -1,14 +1,13 @@
-from click.testing import CliRunner
-from unittest.mock import patch
-from pathlib import Path
 from functools import partial
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+from click.testing import CliRunner
+
 from dflock import utils
-from dflock.main import (
-    cli_group, Delta, Commit, ParsingError, PlanError,
-    write_plan, read_config, App
-)
+from dflock.main import (App, Commit, Delta, ParsingError, PlanError,
+                         cli_group, read_config, write_plan)
 
 UPSTREAM = "upstream"
 LOCAL = "local"
@@ -31,7 +30,7 @@ COMMANDS = [
     "remix",
     "reset",
     "status",
-    "write"
+    "write",
 ]
 
 
@@ -41,6 +40,7 @@ def configuration(tmp_path):
 
     def new_read_config(ctx, cmd, path):
         return read_config(ctx, cmd, test_config_path)
+
     with open(test_config_path, "w") as f:
         f.write(TEST_CONFIG)
     with patch("dflock.main.read_config", new_read_config) as mock:
@@ -110,9 +110,7 @@ def commit_c(git_repository):
 
 @pytest.fixture()
 def local_commits():
-    commits = [
-        Commit("0", "a"), Commit("1", "b"), Commit("2", "c"), Commit("3", "d")
-    ]
+    commits = [Commit("0", "a"), Commit("1", "b"), Commit("2", "c"), Commit("3", "d")]
     with patch("dflock.main.App._get_local_commits", return_value=commits):
         yield commits
 
@@ -126,6 +124,7 @@ def commit(git_repository):
             utils.run("add", path)
         utils.run("commit", "-m", message)
         return utils.run("rev-parse", "HEAD")
+
     return _commit
 
 
@@ -135,6 +134,7 @@ def create_branch(git_repository):
         utils.run("checkout", "-b", name, cwd=git_repository)
         if not checkout:
             utils.run("checkout", "-", cwd=git_repository)
+
     return _create_branch
 
 
@@ -142,6 +142,7 @@ def create_branch(git_repository):
 def checkout(git_repository):
     def _checkout(name):
         utils.run("checkout", name, cwd=git_repository)
+
     return _checkout
 
 
@@ -338,10 +339,7 @@ def test_plan__not_a_git_repo(cmd):
         else:
             result = runner.invoke(cli_group, [cmd])
     assert result.exit_code == 1
-    assert (
-        "Error: No git repository detected"
-        in result.output
-    )
+    assert "No git repository detected." in result.output
 
 
 @pytest.mark.parametrize("anchor_commit", ["first", "last"])
@@ -381,10 +379,7 @@ def test_plan__failed_cherry_pick(
     create_branch(LOCAL)
     result = runner.invoke(cli_group, ["plan", "flat"])
     assert result.exit_code == 1
-    assert (
-        "Error: Cherry-pick failed"
-        in result.output
-    )
+    assert "Error: Cherry-pick failed" in result.output
 
 
 def test_plan__duplicate_commit_names(
@@ -397,15 +392,10 @@ def test_plan__duplicate_commit_names(
     create_branch(LOCAL)
     result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
-    assert (
-        "Error: Duplicate commit messages found in local commits."
-        in result.output
-    )
+    assert "Error: Duplicate commit messages found in local commits." in result.output
 
 
-def test_plan__diverged(
-    runner, git_repository, commit, checkout, create_branch
-):
+def test_plan__diverged(runner, git_repository, commit, checkout, create_branch):
     commit(dict(a="a"), "0")
     create_branch(LOCAL)
     commit(dict(a="b"), "1")
@@ -415,9 +405,7 @@ def test_plan__diverged(
     assert "Error: Your local and upstream have diverged." in result.output
 
 
-def test_plan__nonexistent_upstream(
-    runner, git_repository, commit, create_branch
-):
+def test_plan__nonexistent_upstream(runner, git_repository, commit, create_branch):
     commit(dict(a="a"), "0")
     create_branch(LOCAL)
     result = runner.invoke(cli_group, ["plan"])
@@ -425,9 +413,7 @@ def test_plan__nonexistent_upstream(
     assert f"Error: Upstream {UPSTREAM} does not exist" in result.output
 
 
-def test_plan__nonexistent_local(
-    runner, git_repository, commit, create_branch
-):
+def test_plan__nonexistent_local(runner, git_repository, commit, create_branch):
     commit(dict(a="a"), "0")
     create_branch(UPSTREAM)
     result = runner.invoke(cli_group, ["plan"])
@@ -435,9 +421,7 @@ def test_plan__nonexistent_local(
     assert f"Error: Local {LOCAL} does not exist" in result.output
 
 
-def test_plan__work_tree_not_clean(
-    runner, git_repository, commit, create_branch
-):
+def test_plan__work_tree_not_clean(runner, git_repository, commit, create_branch):
     commit(dict(a="a"), "0")
     create_branch(UPSTREAM)
     commit(dict(a="aa"), "1")
@@ -527,7 +511,9 @@ def test_status__show_branches(app, runner, commit, create_branch, git_repositor
     assert branch_name in result.output
 
 
-def test_status__show_branches_with_targets(app, runner, commit, create_branch, git_repository):
+def test_status__show_branches_with_targets(
+    app, runner, commit, create_branch, git_repository
+):
     commit(dict(a="a"), "a")
     create_branch(UPSTREAM)
     sha = commit(dict(b="b"), "b")

@@ -144,55 +144,6 @@ class NoRemoteTrackingBranch(DflockException):
     pass
 
 
-@dataclass
-class App:
-    local: str
-    upstream: str
-    remote: str
-    branch_template: str
-    anchor_commit: str
-    editor: str
-
-    @classmethod
-    def from_config(cls, config: typing.Mapping) -> typing.Self:
-        return cls(
-            local=config["local"],
-            upstream=config["upstream"],
-            remote=config["remote"],
-            branch_template=config["branch-template"],
-            anchor_commit=config["anchor-commit"],
-            editor=config["editor"],
-        )
-
-    @property
-    def upstream_name(self):
-        if self.remote == "":
-            return self.upstream
-        return f"{self.remote}/{self.upstream}"
-
-    def build_tree(self, stack: bool = True) -> dict[str, "Delta"]:
-        """Create a simple plan including all local commits.
-
-        If stack is False, treat every commit as an independent delta,
-        otherwise create a stack of deltas.
-        """
-        commits = get_local_commits(self.local, self.upstream)
-        tree: dict[str, Delta] = {}
-        target = None
-        for commit in commits:
-            delta = Delta(
-                [commit],
-                target,
-                self.anchor_commit,
-                self.upstream,
-                self.branch_template
-            )
-            tree[delta.branch_name] = delta
-            if stack:
-                target = delta
-        return tree
-
-
 class Commit(typing.NamedTuple):
     sha: str
     message: str
@@ -297,6 +248,55 @@ class Delta(typing.NamedTuple):
             "Branch {self.branch_name} with commits:"
             "\n".join(f"\t{c.short_message}" for c in self.commits)
         )
+
+
+@dataclass
+class App:
+    local: str
+    upstream: str
+    remote: str
+    branch_template: str
+    anchor_commit: str
+    editor: str
+
+    @classmethod
+    def from_config(cls, config: typing.Mapping) -> typing.Self:
+        return cls(
+            local=config["local"],
+            upstream=config["upstream"],
+            remote=config["remote"],
+            branch_template=config["branch-template"],
+            anchor_commit=config["anchor-commit"],
+            editor=config["editor"],
+        )
+
+    @property
+    def upstream_name(self):
+        if self.remote == "":
+            return self.upstream
+        return f"{self.remote}/{self.upstream}"
+
+    def build_tree(self, stack: bool = True) -> dict[str, "Delta"]:
+        """Create a simple plan including all local commits.
+
+        If stack is False, treat every commit as an independent delta,
+        otherwise create a stack of deltas.
+        """
+        commits = get_local_commits(self.local, self.upstream)
+        tree: dict[str, Delta] = {}
+        target = None
+        for commit in commits:
+            delta = Delta(
+                [commit],
+                target,
+                self.anchor_commit,
+                self.upstream,
+                self.branch_template
+            )
+            tree[delta.branch_name] = delta
+            if stack:
+                target = delta
+        return tree
 
 
 def is_inside_work_tree() -> bool:

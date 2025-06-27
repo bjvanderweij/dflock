@@ -1,7 +1,7 @@
 import subprocess
 import uuid
-from pathlib import Path
 from contextlib import contextmanager
+from pathlib import Path
 
 
 class CalledProcessError(subprocess.CalledProcessError):
@@ -38,7 +38,7 @@ def get_head() -> str:
     if head.startswith("ref: "):
         ref = head.split()[1]
         assert ref.startswith("refs/heads/")
-        return ref[len("refs/heads/"):]
+        return ref[len("refs/heads/") :]
     return head
 
 

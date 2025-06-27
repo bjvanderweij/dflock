@@ -342,6 +342,11 @@ class App:
                 tree[delta.branch_name] = delta
         return tree
 
+    def parse_plan(self, plan: str) -> dict[str, Delta]:
+        tokens = _tokenize_plan(plan)
+        commit_lists = self._make_commit_lists(tokens)
+        return self._build_tree(commit_lists)
+
     def _infer_delta_last_commit(
         self,
         commit: Commit,
@@ -435,6 +440,92 @@ class App:
         return Delta(
             branch_commits, target, self.anchor_commit, self.upstream, self.branch_template
         )
+
+    def _make_commit_lists(
+        self, branch_commands: typing.Iterable["_BranchCommand"],
+    ) -> list["_CommitList"]:
+        """Build lists of contiguous commits belonging to a branch."""
+        branches: list[_CommitList] = []
+        local_commits = iter(get_local_commits(self.local, self.upstream))
+        for bc in branch_commands:
+            if len(branches) == 0 or bc.label != branches[-1].label:
+                branches.append(_CommitList(bc.label, None, []))
+            try:
+                commit = next(
+                    c for c in local_commits if c.sha.startswith(bc.commit_sha)
+                )
+            except StopIteration:
+                raise PlanError("cannot match commits in plan to local commits")
+            branches[-1].commits.append(commit)
+            if bc.target_label is not None:
+                if branches[-1].target_label is None:
+                    branch = branches.pop(-1)
+                    branches.append(branch._replace(target_label=bc.target_label))
+                elif branches[-1].target_label != bc.target_label:
+                    raise PlanError(
+                        f"multiple targets specified for {branches[-1].label}"
+                    )
+        return branches
+
+    def _build_tree(
+        self, candidate_deltas: typing.Iterable["_CommitList"],
+    ) -> dict[str, Delta]:
+        """Parse branching plan and return a branch DAG.
+
+        Enforce the following constraints on the DAG:
+
+        - branches point to either
+            - the target of the last branch
+            - one of the set of immediately preceding branches with the same target
+        - commits in a branch appear in the same order as the local commits
+        """
+        deltas: dict[str, Delta] = {}
+        last_target_label = None
+        valid_target_labels: set[None | str] = {None}
+        for d in candidate_deltas:
+            if d.target_label not in valid_target_labels:
+                hints = [
+                    "re-order commits with "
+                    f"`git rebase --interactive {self.local} {self.upstream}`"
+                ]
+                raise PlanError(
+                    f"invalid target for \"{d.label}\": \"{d.target_label}\"",
+                    hints=hints
+                )
+            target_branch = None
+            if d.target_label is not None:
+                target_branch = deltas[d.target_label]
+            if d.target_label != last_target_label:
+                last_target_label = d.target_label
+                valid_target_labels = {last_target_label}
+            valid_target_labels.add(d.label)
+            deltas[d.label] = Delta(
+                d.commits,
+                target_branch,
+                self.anchor_commit,
+                self.upstream,
+                self.branch_template
+            )
+        return {b.branch_name: b for b in deltas.values()}
+
+
+def _tokenize_plan(plan: str) -> typing.Iterable["_BranchCommand"]:
+    for line in iterate_plan(plan):
+        try:
+            command, sha, *_ = line.split()
+        except ValueError:
+            raise ParsingError(
+                "each line should contain at least a command and a commit SHA"
+            )
+        if command.startswith("b"):
+            m = re.match(r"b([0-9]*)(@b?([0-9]*))?$", command)
+            if not m:
+                raise ParsingError(f"unrecognized command: {command}")
+            label, _, target = m.groups()
+
+            yield _BranchCommand(label, target, sha)
+        elif command != "s":
+            raise ParsingError(f"unrecognized command: {command}")
 
 
 def is_inside_work_tree() -> bool:
@@ -530,115 +621,6 @@ def iterate_plan(plan: str):
         if line.startswith("#") or not line.strip():
             continue
         yield line
-
-
-def _tokenize_plan(plan: str) -> typing.Iterable[_BranchCommand]:
-    for line in iterate_plan(plan):
-        try:
-            command, sha, *_ = line.split()
-        except ValueError:
-            raise ParsingError(
-                "each line should contain at least a command and a commit SHA"
-            )
-        if command.startswith("b"):
-            m = re.match(r"b([0-9]*)(@b?([0-9]*))?$", command)
-            if not m:
-                raise ParsingError(f"unrecognized command: {command}")
-            label, _, target = m.groups()
-
-            yield _BranchCommand(label, target, sha)
-        elif command != "s":
-            raise ParsingError(f"unrecognized command: {command}")
-
-
-def _make_commit_lists(
-    branch_commands: typing.Iterable[_BranchCommand],
-    local: str,
-    upstream: str,
-) -> list[_CommitList]:
-    """Build lists of contiguous commits belonging to a branch."""
-    branches: list[_CommitList] = []
-    local_commits = iter(get_local_commits(local, upstream))
-    for bc in branch_commands:
-        if len(branches) == 0 or bc.label != branches[-1].label:
-            branches.append(_CommitList(bc.label, None, []))
-        try:
-            commit = next(
-                c for c in local_commits if c.sha.startswith(bc.commit_sha)
-            )
-        except StopIteration:
-            raise PlanError("cannot match commits in plan to local commits")
-        branches[-1].commits.append(commit)
-        if bc.target_label is not None:
-            if branches[-1].target_label is None:
-                branch = branches.pop(-1)
-                branches.append(branch._replace(target_label=bc.target_label))
-            elif branches[-1].target_label != bc.target_label:
-                raise PlanError(
-                    f"multiple targets specified for {branches[-1].label}"
-                )
-    return branches
-
-
-def _build_tree(
-    candidate_deltas: typing.Iterable[_CommitList],
-    local: str,
-    upstream: str,
-    anchor_commit: str,
-    branch_template: str,
-) -> dict[str, Delta]:
-    """Parse branching plan and return a branch DAG.
-
-    Enforce the following constraints on the DAG:
-
-    - branches point to either
-        - the target of the last branch
-        - one of the set of immediately preceding branches with the same target
-    - commits in a branch appear in the same order as the local commits
-    """
-    deltas: dict[str, Delta] = {}
-    last_target_label = None
-    valid_target_labels: set[None | str] = {None}
-    for d in candidate_deltas:
-        if d.target_label not in valid_target_labels:
-            hints = [
-                "re-order commits with "
-                f"`git rebase --interactive {local} {upstream}`"
-            ]
-            raise PlanError(
-                f"invalid target for \"{d.label}\": \"{d.target_label}\"",
-                hints=hints
-            )
-        target_branch = None
-        if d.target_label is not None:
-            target_branch = deltas[d.target_label]
-        if d.target_label != last_target_label:
-            last_target_label = d.target_label
-            valid_target_labels = {last_target_label}
-        valid_target_labels.add(d.label)
-        deltas[d.label] = Delta(
-            d.commits, target_branch, anchor_commit, upstream, branch_template
-
-        )
-    return {b.branch_name: b for b in deltas.values()}
-
-
-def parse_plan(
-    plan: str,
-    local: str,
-    upstream: str,
-    anchor_commit: str,
-    branch_template: str
-) -> dict[str, Delta]:
-    tokens = _tokenize_plan(plan)
-    commit_lists = _make_commit_lists(tokens, local, upstream)
-    return _build_tree(
-        commit_lists,
-        local,
-        upstream,
-        anchor_commit,
-        branch_template
-    )
 
 
 def render_plan(tree: dict[str, Delta], local: str, upstream: str) -> str:
@@ -935,9 +917,7 @@ def plan(app, strategy, edit, show) -> None:
     click.echo(f"{new_plan}\n")
     if not show:
         try:
-            tree = parse_plan(
-                new_plan, app.local, app.upstream_name, app.anchor_commit, app.branch_template
-            )
+            tree = app.parse_plan(new_plan)
             with utils.return_to_head():
                 write_plan(tree)
             click.echo(

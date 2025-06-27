@@ -6,7 +6,7 @@ from functools import partial
 import pytest
 from dflock import utils
 from dflock.main import (
-    cli_group, Delta, Commit, parse_plan, ParsingError, PlanError,
+    cli_group, Delta, Commit, ParsingError, PlanError,
     write_plan, get_local_commits, render_plan,
     read_config, App
 )
@@ -135,74 +135,70 @@ def checkout(git_repository):
 
 
 def test_parse_plan__syntax_errors(app, local_commits):
-    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
     with pytest.raises(ParsingError):
-        parse_plan("s 0 a\na 1 b\ns 2 v", *config_args) == {}
+        app.parse_plan("s 0 a\na 1 b\ns 2 v") == {}
     with pytest.raises(ParsingError):
-        parse_plan("b@s 0 a", *config_args) == {}
+        app.parse_plan("b@s 0 a") == {}
     with pytest.raises(ParsingError):
-        parse_plan("s 0 a\nb\ns 2 v", *config_args) == {}
+        app.parse_plan("s 0 a\nb\ns 2 v") == {}
 
 
-def test_parse_plan__illegal_plans(local_commits):
-    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
+def test_parse_plan__illegal_plans(app, local_commits):
     with pytest.raises(PlanError, match="cannot match"):
         # Unrecognized commit
-        parse_plan("s 0 a\nb1 a\ns 2 v", *config_args) == {}
+        app.parse_plan("s 0 a\nb1 a\ns 2 v") == {}
     with pytest.raises(PlanError, match="cannot match"):
         # Out of order commits
-        parse_plan("b 1 a\nb 0 foo", *config_args) == {}
+        app.parse_plan("b 1 a\nb 0 foo") == {}
     with pytest.raises(PlanError, match="invalid target"):
         # Non contiguous commits in branch
-        parse_plan("b 0 a\nb1@b 1 foo\nb  2 v", *config_args) == {}
+        app.parse_plan("b 0 a\nb1@b 1 foo\nb  2 v") == {}
     with pytest.raises(PlanError, match="invalid target"):
         # Incorrect target
-        parse_plan("b@b1 0 a\nb1 1 foo", *config_args) == {}
+        app.parse_plan("b@b1 0 a\nb1 1 foo") == {}
     with pytest.raises(PlanError, match="multiple targets"):
         # Conflicting targets
-        parse_plan("b 0 a\nb1 1\nb2@b 2 v\nb2@b1 3", *config_args) == {}
+        app.parse_plan("b 0 a\nb1 1\nb2@b 2 v\nb2@b1 3") == {}
     with pytest.raises(PlanError, match="invalid target"):
         # "Crossing" branches
-        parse_plan("b 0 a\nb1@b 1 foo\nb2 2 v", *config_args) == {}
+        app.parse_plan("b 0 a\nb1@b 1 foo\nb2 2 v") == {}
 
 
 @pytest.mark.parametrize("anchor_commit", ["first", "last"])
-def test_parse_plan__legal_plans(local_commits, anchor_commit):
+def test_parse_plan__legal_plans(app, local_commits, anchor_commit):
+    app.anchor_commit = anchor_commit
     config_args = [anchor_commit, UPSTREAM, BRANCH_TEMPLATE]
-    config_args_parse = [LOCAL, UPSTREAM, anchor_commit, BRANCH_TEMPLATE]
     a, b, c, d = local_commits
     # Equivalent plans
     delta = Delta([c], None, *config_args)
     tree = {delta.branch_name: delta}
-    v0 = parse_plan("s 0 a\ns 1 b\nb0 2 v", *config_args_parse)
-    v1 = parse_plan("s 0 a\nb0 2 v", *config_args_parse)
-    v2 = parse_plan("b0 2 v", *config_args_parse)
-    v3 = parse_plan("b 2 v", *config_args_parse)
-    v4 = parse_plan("b 2", *config_args_parse)
+    v0 = app.parse_plan("s 0 a\ns 1 b\nb0 2 v")
+    v1 = app.parse_plan("s 0 a\nb0 2 v")
+    v2 = app.parse_plan("b0 2 v")
+    v3 = app.parse_plan("b 2 v")
+    v4 = app.parse_plan("b 2")
     assert v0 == v1 == v2 == v3 == v4 == tree
     # Empty plans
-    assert parse_plan("", *config_args_parse) == {}
-    assert parse_plan("s 0 a\ns 1 b\ns 2 v", *config_args_parse) == {}
+    assert app.parse_plan("") == {}
+    assert app.parse_plan("s 0 a\ns 1 b\ns 2 v") == {}
     # Optional target specifications
     b0 = Delta([a], None, *config_args)
     b1 = Delta([b, c], b0, *config_args)
     tree = {d.branch_name: d for d in [b0, b1]}
-    variant_1 = parse_plan("b 0 a\nb1@b 1 b\nb1 2 v", *config_args_parse)
-    variant_2 = parse_plan("b 0 a\nb1 1 b\nb1@b 2 v", *config_args_parse)
-    variant_3 = parse_plan("b 0 a\nb1@b 1 b\nb1@b 2 v", *config_args_parse)
-    variant_4 = parse_plan("b 0 a\nb1@ 1 b\nb1@b 2 v", *config_args_parse)
+    variant_1 = app.parse_plan("b 0 a\nb1@b 1 b\nb1 2 v")
+    variant_2 = app.parse_plan("b 0 a\nb1 1 b\nb1@b 2 v")
+    variant_3 = app.parse_plan("b 0 a\nb1@b 1 b\nb1@b 2 v")
+    variant_4 = app.parse_plan("b 0 a\nb1@ 1 b\nb1@b 2 v")
     assert tree == variant_1 == variant_2 == variant_3 == variant_4
     b0 = Delta([a, c], None, *config_args)
     tree = {b0.branch_name: b0}
-    assert parse_plan("b 0 a\ns 1 foo\nb 2 v", *config_args_parse) == tree
+    assert app.parse_plan("b 0 a\ns 1 foo\nb 2 v") == tree
     b0 = Delta([a], None, *config_args)
     b1 = Delta([b], b0, *config_args)
     b2 = Delta([c], b1, *config_args)
     tree = {d.branch_name: d for d in [b0, b1, b2]}
-    variant_1 = parse_plan(
-        "b0 0 a\nb1@b0 1 foo\nb2@b1 2 v", *config_args_parse
-    )
-    variant_2 = parse_plan("b 0 a\nb1@b 1 foo\nb2@1 2 v", *config_args_parse)
+    variant_1 = app.parse_plan("b0 0 a\nb1@b0 1 foo\nb2@b1 2 v")
+    variant_2 = app.parse_plan("b 0 a\nb1@b 1 foo\nb2@1 2 v")
     assert tree == variant_1
     assert tree == variant_2
 
@@ -252,9 +248,8 @@ def test_reconstruct_tree__anchor_commit(app, anchor_commit, dag_commits):
         f"b1 {c3.short_str}\n"
         f"b2@b0 {c4.short_str}"
     )
-    config_args = [LOCAL, UPSTREAM, anchor_commit, BRANCH_TEMPLATE]
     app.anchor_commit = anchor_commit
-    tree = parse_plan(plan, *config_args)
+    tree = app.parse_plan(plan)
     write_plan(tree)
     reconstructed_tree = app.reconstruct_tree()
     b = Delta([c1, c2], None, anchor_commit, UPSTREAM, BRANCH_TEMPLATE)
@@ -283,8 +278,7 @@ def test_reconstruct_tree(app, dag_commits, anchor_commit):
         f"b1 {c3.short_str}\n"
         f"b2@b0 {c4.short_str}"
     )
-    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
-    tree = parse_plan(plan, *config_args)
+    tree = app.parse_plan(plan)
     write_plan(tree)
     reconstructed_tree = app.reconstruct_tree()
     reconstructed_plan = render_plan(reconstructed_tree, LOCAL, UPSTREAM)
@@ -456,8 +450,7 @@ def test_reconstruct_tree_branch_label_first(app, commit, create_branch):
     b1 {c3.sha} {c3.short_message}
     b2@b {c4.sha} {c4.short_message}
     """
-    config_args = [LOCAL, UPSTREAM, ANCHOR_COMMIT, BRANCH_TEMPLATE]
-    tree = parse_plan(plan, *config_args)
+    tree = app.parse_plan(plan)
     write_plan(tree)
     reconstructed_tree = app.reconstruct_tree()
     b = Delta([c1, c2], None, ANCHOR_COMMIT, UPSTREAM, BRANCH_TEMPLATE)

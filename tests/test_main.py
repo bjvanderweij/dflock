@@ -6,8 +6,16 @@ import pytest
 from click.testing import CliRunner
 
 from dflock import utils
-from dflock.main import (App, Commit, Delta, ParsingError, PlanError,
-                         cli_group, read_config, write_plan)
+from dflock.main import (
+    App,
+    Commit,
+    Delta,
+    ParsingError,
+    PlanError,
+    cli_group,
+    read_config,
+    write_plan,
+)
 
 UPSTREAM = "upstream"
 LOCAL = "local"

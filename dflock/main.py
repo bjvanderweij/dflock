@@ -10,7 +10,6 @@ from hashlib import md5
 from pathlib import Path
 
 import click
-import graphviz
 
 from dflock import utils
 

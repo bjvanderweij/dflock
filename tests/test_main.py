@@ -86,7 +86,7 @@ def local(git_repository):
 
 @pytest.fixture()
 def app(configuration):
-    return App.from_config(configuration(None, None, None)["dflock"])
+    return App.from_config(configuration(None, None, None))
 
 
 @pytest.fixture()

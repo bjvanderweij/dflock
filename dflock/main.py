@@ -239,16 +239,29 @@ class App:
     branch_template: str
     anchor_commit: str
     editor: str
+    review_request_templates: dict[str, str]
 
     @classmethod
     def from_config(cls, config: typing.Mapping) -> typing.Self:
+        dflock = config["dflock"]
+        integrations = [
+            (k, k.split(".")[1])
+            for k in config.keys()
+            if re.match(r"^integrations.[a-z-]+$", k)
+        ]
+        review_request_templates = {}
+        for config_key, integration in integrations:
+            review_request_templates[integration] = config[config_key][
+                "review-request-template"
+            ]
         return cls(
-            local=config["local"],
-            upstream=config["upstream"],
-            remote=config["remote"],
-            branch_template=config["branch-template"],
-            anchor_commit=config["anchor-commit"],
-            editor=config["editor"],
+            local=dflock["local"],
+            upstream=dflock["upstream"],
+            remote=dflock["remote"],
+            branch_template=dflock["branch-template"],
+            anchor_commit=dflock["anchor-commit"],
+            editor=dflock["editor"],
+            review_request_templates=review_request_templates,
         )
 
     @property
@@ -375,6 +388,13 @@ class App:
         for branch_name in branches_to_prune:
             click.echo(f"pruning {branch_name}")
             utils.run("branch", "-D", branch_name)
+
+    def create_review_request_command(
+        self, integration: str, source_branch: str, target_branch: str
+    ) -> str:
+        return self.review_request_templates[integration].format(
+            source=source_branch, target=target_branch
+        )
 
     def get_delta_branches(self) -> list[str]:
         branches = utils.get_local_branches()
@@ -727,7 +747,7 @@ def read_config(ctx, cmd, path):
 @click.pass_context
 def cli_group(ctx, config):
     ctx.ensure_object(dict)
-    ctx.obj["config"] = config["dflock"]
+    ctx.obj["config"] = config
 
 
 def cli():
@@ -764,11 +784,21 @@ def cli():
     "--gitlab-merge-request",
     is_flag=True,
     type=bool,
-    help="Use Gitlab-specific push-options to create a merge request",
+    help="Use Gitlab-specific push-options to create a merge request.",
+)
+@click.option(
+    "-r",
+    "--review",
+    nargs=1,
+    type=str,
+    default=None,
+    help="Create a review request for a specific integration.",
 )
 @inside_work_tree
 @pass_app
-def push(app, delta_references, write, interactive, gitlab_merge_request) -> None:
+def push(
+    app, delta_references, write, interactive, gitlab_merge_request, review
+) -> None:
     """Push deltas to the remote."""
     if app.remote == "":
         raise click.ClickException("Remote must be set.")
@@ -800,6 +830,12 @@ def push(app, delta_references, write, interactive, gitlab_merge_request) -> Non
             click.echo(f"Pushing {delta.branch_name}.")
             output = utils.run(*push_command)
             click.echo(output)
+            if review is not None:
+                click.echo(f"Creating review request for {review}.")
+                command = app.create_review_request_command(
+                    review, delta.branch_name, delta.target_branch_name
+                )
+                subprocess.run(command, shell=True)
     click.echo("Delta branches updated.")
 
 

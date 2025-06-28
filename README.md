@@ -34,7 +34,7 @@ git pull --rebase origin/main
 This will integrate the commits that have been approved and integrated into `origin/main` along with work by your team-mates into your local `main`.
 
 You are largely free in how organize your work in local commits.
-Local commits could, but don't have to, correspond to individual features. 
+Local commits could, but don't have to, correspond to individual features.
 Since they are local, you can also freely amend and re-order these commits with `git rebase`.
 
 The part of this that is tedious is managing and updating temporary branches from which integration requests (pull requests or merge requests) are created.

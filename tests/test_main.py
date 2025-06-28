@@ -31,6 +31,8 @@ def git_repository(tmp_path):
     new_run = partial(utils.run, cwd=tmp_path)
     with patch("dflock.utils.run", new_run):
         utils.run("init")
+        utils.run("config", "user.email", "you@example.com")
+        utils.run("config", "user.name", "Your Name")
         yield Path(tmp_path)
 
 

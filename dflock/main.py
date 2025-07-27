@@ -398,6 +398,25 @@ class App:
             self.get_commit_branch_name(c) for c in commits
         )
 
+    def print_deltas(self, show_targets: bool = False, header="Deltas:") -> None:
+        branches = self.get_delta_branches()
+        if len(branches) > 0:
+            if show_targets:
+                tree = self.reconstruct_tree()
+            click.echo(header)
+            for i, branch in enumerate(branches):
+                try:
+                    up_to_date = branch_up_to_date(branch)
+                    click.echo(
+                        f"{'b' + str(i):>4}: "
+                        f"{branch}{'' if up_to_date else ' (diverged)'}"
+                    )
+                except NoRemoteTrackingBranch:
+                    click.echo(f"{'b' + str(i):>4}: {branch} (not pushed)")
+                if show_targets:
+                    target = tree[branch].target_branch_name
+                    click.echo(f"{' ' * 6}@ {target}")
+
     def _create_delta(
         self, commits: typing.Sequence[Commit], target: None | Delta
     ) -> Delta:
@@ -930,7 +949,6 @@ def status(app, show_targets) -> None:
     if not utils.object_exists(app.local):
         raise click.ClickException(f"Local {app.local} does not exist")
     diverged = utils.have_diverged(app.upstream_name, app.local)
-    branches = app.get_delta_branches()
     on_local = utils.get_current_branch() == app.local
     if on_local:
         click.echo("On local branch.")
@@ -938,22 +956,7 @@ def status(app, show_targets) -> None:
         click.echo("NOT on local branch.")
     if diverged:
         click.echo("Local and upstream have diverged")
-    if len(branches) > 0:
-        if show_targets:
-            tree = app.reconstruct_tree()
-        click.echo("\nDeltas:")
-        for i, branch in enumerate(branches):
-            try:
-                up_to_date = branch_up_to_date(branch)
-                click.echo(
-                    f"{'b' + str(i):>4}: "
-                    f"{branch}{'' if up_to_date else ' (diverged)'}"
-                )
-            except NoRemoteTrackingBranch:
-                click.echo(f"{'b' + str(i):>4}: {branch} (not pushed)")
-            if show_targets:
-                target = tree[branch].target_branch_name
-                click.echo(f"{' ' * 6}@ {target}")
+    app.print_deltas(show_targets, header="\nDeltas:")
 
 
 @cli_group.command()

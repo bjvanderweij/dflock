@@ -43,6 +43,7 @@ def on_local(f):
     @functools.wraps(f)
     def wrapper(app, *args, **kwargs):
         if utils.get_current_branch() != app.local:
+            click.echo("Hint: Use `dfl checkout local` to return to local.")
             raise click.ClickException(
                 f"You must be on your the local branch: {app.local}"
             )
@@ -66,7 +67,7 @@ def no_hot_branch(f) -> typing.Callable:
     def wrapper(app, *args, **kwargs):
         if utils.get_current_branch() in app.get_hot_branches():
             raise click.ClickException(
-                "please switch to a branch not managed by dflock before " "continuing"
+                "please switch to a branch not managed by dflock before continuing"
             )
         return f(app, *args, **kwargs)
 
@@ -77,11 +78,7 @@ def undiverged(f):
     @functools.wraps(f)
     def wrapper(app, *args, **kwargs):
         if utils.have_diverged(app.upstream_name, app.local):
-            click.echo(
-                "Hint: Use `dfl pull` or "
-                f"`git pull --rebase {app.remote} {app.upstream}` to pull "
-                "upstream changes into your local branch."
-            )
+            click.echo("Hint: Use `dfl pull` to pull upstream changes into local.")
             raise click.ClickException("Your local and upstream have diverged.")
         return f(app, *args, **kwargs)
 
@@ -490,7 +487,8 @@ class App:
             else:
                 if cc.message != root.message:
                     click.echo(
-                        "warning: unknown commit message encountered: "
+                        "warning: unknown commit message encountered on branch "
+                        + f"{branch_name} "
                         + cc.short_message
                     )
                 break
@@ -570,10 +568,7 @@ class App:
         valid_target_labels: set[None | str] = {None}
         for d in candidate_deltas:
             if d.target_label not in valid_target_labels:
-                hints = [
-                    "re-order commits with "
-                    f"`git rebase --interactive {self.local} {self.upstream}`"
-                ]
+                hints = ["re-order commits with `dfl remix`"]
                 raise PlanError(
                     f'invalid target for "{d.label}": "{d.target_label}"', hints=hints
                 )
@@ -829,6 +824,7 @@ def push(
         except CherryPickFailed as exc:
             exc.emit_hints()
             raise click.ClickException(str(exc))
+        click.echo("Delta branches updated.")
     deltas = list(tree.values())
     if len(delta_references) > 0:
         branches = [d.branch_name for d in deltas]
@@ -855,7 +851,6 @@ def push(
                     change_request, delta.branch_name, delta.target_branch_name
                 )
                 subprocess.run(command, shell=True)
-    click.echo("Delta branches updated.")
 
 
 @cli_group.command()
@@ -917,17 +912,16 @@ def plan(app, strategy, edit, show) -> None:
             return
     else:
         new_plan = plan
-    click.echo(f"{new_plan}\n")
     if not show:
         try:
             tree = app.parse_plan(new_plan)
             with utils.return_to_head():
                 write_plan(tree)
-            click.echo("Branches updated. Run `dfl push` to push them to a remote.")
+            app.print_deltas(header="Deltas written:")
+            click.echo("Run `dfl push` to push deltas to the remote.")
             app.prune_local_branches(tree)
-        except ParsingError as exc:
-            raise click.ClickException(str(exc))
-        except (PlanError, CherryPickFailed) as exc:
+        except (ParsingError, PlanError, CherryPickFailed) as exc:
+            click.echo(f"Received plan:\n\n{new_plan}\n")
             exc.emit_hints()
             raise click.ClickException(str(exc))
 
@@ -971,6 +965,10 @@ def remix(app) -> None:
     Only works when on local.
     """
     subprocess.run(f"git rebase -i {app.upstream_name}", shell=True)
+    click.echo(
+        "Hint: if you changed or amended commits, you need to run `dfl write` to "
+        "update your delta branches."
+    )
 
 
 @cli_group.command()
@@ -1039,7 +1037,8 @@ def write(app) -> None:
     except CherryPickFailed as exc:
         exc.emit_hints()
         raise click.ClickException(str(exc))
-    click.echo("Delta branches updated.")
+    app.print_deltas(header="Deltas written:")
+    click.echo("Run `dfl push` to push deltas to the remote.")
 
 
 @cli_group.command()

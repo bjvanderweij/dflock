@@ -728,6 +728,15 @@ def edit_interactively(contents: str, editor: str) -> str:
             return text_file_read.read()
 
 
+def get_config_paths():
+    paths = []
+    if is_inside_work_tree():
+        root_path = Path(utils.run("rev-parse", "--show-toplevel").strip())
+        paths = [root_path / ".dflock"]
+    paths.append(Path("~/.dflock").expanduser())
+    return paths
+
+
 def read_config(ctx, cmd, path):
     config = configparser.ConfigParser()
     config["dflock"] = {
@@ -738,14 +747,10 @@ def read_config(ctx, cmd, path):
         "branch-template": DEFAULT_BRANCH_TEMPLATE,
         "editor": DEFAULT_EDITOR,
     }
-    paths = []
     if path is not None:
         paths = [path]
     else:
-        if is_inside_work_tree():
-            root_path = Path(utils.run("rev-parse", "--show-toplevel").strip())
-            paths = [root_path / ".dflock"]
-        paths.append(Path("~/.dflock").expanduser())
+        paths = get_config_paths()
     config.read(paths)
     return config
 
@@ -1074,3 +1079,30 @@ def reset(app, yes) -> None:
     if confirmed or yes:
         for branch_name in branches:
             utils.run("branch", "-D", branch_name)
+
+
+@cli_group.command()
+@inside_work_tree
+def init() -> None:
+    paths = get_config_paths()
+    for path in paths:
+        if path.exists():
+            click.echo(f"Note: existing config found at {path}.")
+    root_path = Path(utils.run("rev-parse", "--show-toplevel").strip())
+    upstream = click.prompt("Name of your upstream branch?", default=DEFAULT_UPSTREAM)
+    local = click.prompt("Name of your local branch?", default=DEFAULT_LOCAL)
+    remote = click.prompt("Name of your remote?", default=DEFAULT_REMOTE)
+    editor = click.prompt("Command for invoking your editor?", default=DEFAULT_EDITOR)
+    config_path = root_path / ".dflock"
+    click.confirm(
+        f"Continue to write provided values to {config_path}?", abort=True, default="Y"
+    )
+    config = configparser.ConfigParser()
+    with open(config_path, "w") as f:
+        config["dflock"] = {
+            "upstream": upstream,
+            "local": local,
+            "remote": remote,
+            "editor": editor,
+        }
+        config.write(f)

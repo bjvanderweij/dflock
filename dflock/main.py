@@ -367,11 +367,16 @@ class App:
                 lines.append(f"{command} {commit.short_str}")
         return "\n".join(lines)
 
-    def prune_local_branches(self, tree: dict[str, Delta]) -> None:
-        hot_branches = self.get_hot_branches()
+    def prune_local_branches(
+        self, tree: None | dict[str, Delta] = None, hot_branches=None
+    ) -> None:
+        if tree is None:
+            tree = self.reconstruct_tree()
+        if hot_branches is None:
+            hot_branches = self.get_hot_branches()
         branches_to_prune = hot_branches - set(tree.keys())
         for branch_name in branches_to_prune:
-            click.echo(f"pruning {branch_name}")
+            click.echo(f"Pruning {branch_name}.")
             utils.run("branch", "-D", branch_name)
 
     def create_change_request_command(
@@ -921,7 +926,7 @@ def plan(app, strategy, edit, show) -> None:
                 write_plan(tree)
             app.print_deltas(header="Deltas written:")
             click.echo("Run `dfl push` to push deltas to the remote.")
-            app.prune_local_branches(tree)
+            app.prune_local_branches(tree=tree)
         except (ParsingError, PlanError, CherryPickFailed) as exc:
             click.echo(f"Received plan:\n\n{new_plan}\n")
             exc.emit_hints()
@@ -966,7 +971,9 @@ def remix(app) -> None:
 
     Only works when on local.
     """
+    hot_branches = app.get_hot_branches()
     subprocess.run(f"git rebase -i {app.upstream_name}", shell=True)
+    app.prune_local_branches(hot_branches=hot_branches)
     click.echo(
         "Hint: if you changed or amended commits, you need to run `dfl write` to "
         "update your delta branches."
@@ -984,7 +991,9 @@ def pull(app) -> None:
     """
     if app.remote == "":
         raise click.ClickException("Remote must be set.")
+    hot_branches = app.get_hot_branches()
     subprocess.run(f"git pull --rebase {app.remote} {app.upstream}", shell=True)
+    app.prune_local_branches(hot_branches=hot_branches)
 
 
 @cli_group.command()

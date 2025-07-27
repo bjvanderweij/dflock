@@ -1000,7 +1000,7 @@ def log(app) -> None:
 
 @cli_group.command()
 @inside_work_tree
-@click.argument("delta-reference", type=str)
+@click.argument("delta-reference", required=False, default=None, type=str)
 @pass_app
 def checkout(app, delta_reference) -> None:
     """Checkout deltas or the local branch.
@@ -1012,8 +1012,9 @@ def checkout(app, delta_reference) -> None:
     delta with that index.
 
     Otherwise, try to do a partial match against your delta branch names.
-    This only works if there is a unique match."""
-    if delta_reference in ["local", app.local]:
+    This only works if there is a unique match.
+    """
+    if delta_reference in ["local", app.local, None]:
         branch = app.local
     else:
         branches = app.get_delta_branches()

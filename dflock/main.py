@@ -342,7 +342,7 @@ class App:
         commit_lists = self._make_commit_lists(tokens)
         return self._build_tree(commit_lists)
 
-    def render_plan(self, tree: dict[str, Delta]) -> str:
+    def render_plan(self, tree: dict[str, Delta], include_skipped=True) -> str:
         local_commits = self._get_local_commits()
         sorted_deltas = list(
             sorted(tree.values(), key=lambda d: local_commits.index(d.commits[0]))
@@ -361,8 +361,10 @@ class App:
                 command = f"b{d_i}"
                 if delta.target is not None:
                     target_i = sorted_deltas.index(delta.target)
-                    command += f"@b{target_i}"
-            lines.append(f"{command} {commit.short_str}")
+                    command += f"@{target_i}"
+                lines.append(f"{command} {commit.short_str}")
+            elif include_skipped:
+                lines.append(f"{command} {commit.short_str}")
         return "\n".join(lines)
 
     def prune_local_branches(self, tree: dict[str, Delta]) -> None:

@@ -9,7 +9,6 @@ from dflock import utils
 from dflock.main import (
     App,
     Commit,
-    Delta,
     ParsingError,
     PlanError,
     cli_group,

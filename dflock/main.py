@@ -276,20 +276,6 @@ class App:
         readable = "-".join(words)
         return self.branch_template.format(f"{readable}-{uniqueish}")
 
-    def _create_delta(
-        self, commits: typing.Sequence[Commit], target: None | Delta
-    ) -> Delta:
-        commits = list(commits)
-        branch_name = (
-            self.get_commit_branch_name(commits[0])
-            if self.anchor_commit == "first"
-            else self.get_commit_branch_name(commits[-1])
-        )
-        target_branch_name = (
-            self.upstream_name if target is None else target.branch_name
-        )
-        return Delta(commits, target, branch_name, target_branch_name)
-
     def build_tree(self, stack: bool = True) -> dict[str, "Delta"]:
         """Create a simple plan including all local commits.
 
@@ -411,6 +397,20 @@ class App:
         return set(local_branches) & set(
             self.get_commit_branch_name(c) for c in commits
         )
+
+    def _create_delta(
+        self, commits: typing.Sequence[Commit], target: None | Delta
+    ) -> Delta:
+        commits = list(commits)
+        branch_name = (
+            self.get_commit_branch_name(commits[0])
+            if self.anchor_commit == "first"
+            else self.get_commit_branch_name(commits[-1])
+        )
+        target_branch_name = (
+            self.upstream_name if target is None else target.branch_name
+        )
+        return Delta(commits, target, branch_name, target_branch_name)
 
     def _get_local_commits(self) -> list[Commit]:
         """Return all commits between upstream and local."""

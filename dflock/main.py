@@ -195,16 +195,16 @@ class Delta(typing.NamedTuple):
             )
 
     def get_force_push_command(
-        self, remote: str, gitlab_merge_request: bool = False
+        self, remote: str, merge_request: bool = False
     ) -> list[str]:
         command = [
             "push",
-            "--force",
+            "--force-with-lease",
             "--set-upstream",
             remote,
             f"{self.full_branch_name}:{self.full_branch_name}",
         ]
-        if gitlab_merge_request:
+        if merge_request:
             command += ["--push-option", "merge_request.create"]
             if self.target is not None:
                 command += [
@@ -239,7 +239,7 @@ class App:
     branch_template: str
     anchor_commit: str
     editor: str
-    review_request_templates: dict[str, str]
+    change_request_templates: dict[str, str]
 
     @classmethod
     def from_config(cls, config: typing.Mapping) -> typing.Self:
@@ -249,10 +249,10 @@ class App:
             for k in config.keys()
             if re.match(r"^integrations.[a-z-]+$", k)
         ]
-        review_request_templates = {}
+        change_request_templates = {}
         for config_key, integration in integrations:
-            review_request_templates[integration] = config[config_key][
-                "review-request-template"
+            change_request_templates[integration] = config[config_key][
+                "change-request-template"
             ]
         return cls(
             local=dflock["local"],
@@ -261,7 +261,7 @@ class App:
             branch_template=dflock["branch-template"],
             anchor_commit=dflock["anchor-commit"],
             editor=dflock["editor"],
-            review_request_templates=review_request_templates,
+            change_request_templates=change_request_templates,
         )
 
     @property
@@ -309,13 +309,13 @@ class App:
     def reconstruct_tree(self) -> dict[str, Delta]:
         """Use local commits to reconstruct the plan.
 
-        Assumes that the commits in local branches have the same commit messages
+        Assumes that the commits in ephemeral branches have the same commit messages
         as commits in local commits.
 
         Algorithm when branch name is derived from last commit:
 
         get local commits in chronological order
-        get local branches
+        get ephemeral branches
         for commit in local commits
         if branch name exists as local branch
         get n preceding commits where n is index of commit in local commits
@@ -326,7 +326,7 @@ class App:
         when name is derived from first commit:
 
         get local commits in chronological order
-        get local branches
+        get ephemeral branches
         for commit in local commits
         if branch name exists as local branch
         get commits in branch from tip (n_local_commits - index_of_current_commit)
@@ -389,10 +389,10 @@ class App:
             click.echo(f"pruning {branch_name}")
             utils.run("branch", "-D", branch_name)
 
-    def create_review_request_command(
+    def create_change_request_command(
         self, integration: str, source_branch: str, target_branch: str
     ) -> str:
-        return self.review_request_templates[integration].format(
+        return self.change_request_templates[integration].format(
             source=source_branch, target=target_branch
         )
 
@@ -781,23 +781,23 @@ def cli():
 )
 @click.option(
     "-m",
-    "--gitlab-merge-request",
+    "--merge-request",
     is_flag=True,
     type=bool,
-    help="Use Gitlab-specific push-options to create a merge request.",
+    help="Use push-options to create a merge request (only works for Gitlab).",
 )
 @click.option(
-    "-r",
-    "--review",
+    "-c",
+    "--change-request",
     nargs=1,
     type=str,
     default=None,
-    help="Create a review request for a specific integration.",
+    help="Create a change request for a given integration.",
 )
 @inside_work_tree
 @pass_app
 def push(
-    app, delta_references, write, interactive, gitlab_merge_request, review
+    app, delta_references, write, interactive, merge_request, change_request
 ) -> None:
     """Push deltas to the remote."""
     if app.remote == "":
@@ -825,15 +825,15 @@ def push(
             )
         if not interactive or do_it:
             push_command = delta.get_force_push_command(
-                app.remote, gitlab_merge_request=gitlab_merge_request
+                app.remote, merge_request=merge_request
             )
             click.echo(f"Pushing {delta.branch_name}.")
             output = utils.run(*push_command)
             click.echo(output)
-            if review is not None:
-                click.echo(f"Creating review request for {review}.")
-                command = app.create_review_request_command(
-                    review, delta.branch_name, delta.target_branch_name
+            if change_request is not None:
+                click.echo(f"Creating change request for {change_request}.")
+                command = app.create_change_request_command(
+                    change_request, delta.branch_name, delta.target_branch_name
                 )
                 subprocess.run(command, shell=True)
     click.echo("Delta branches updated.")
@@ -865,18 +865,19 @@ def push(
 @no_hot_branch
 @undiverged
 def plan(app, strategy, edit, show) -> None:
-    """Create a plan and update local branches.
+    """Create a plan and update ephemeral branches.
 
-    The optional argument specifies the type of plan to generate. Available
-    types are:
+    The optional STRATEGY argument can be used to generate a plan. Available
+    strategies are:
 
     \b
     detect (default): use the last-applied plan
-    stack: package each commit in a branch and make each branch depend on the
-             previous branch.
-    flat: package each commit in a separate independent branch
-    empty: generate an empty plan
+    stack: create one delta per commit and make delta depend on the
+             previous one
+    flat: create one delta per commit
+    empty: do not create any deltas
 
+    Unless detect is used the previous plan will be overwritten.
     """
     if strategy == "stack":
         tree = app.build_tree(stack=True)

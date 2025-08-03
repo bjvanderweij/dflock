@@ -22,19 +22,16 @@ DEFAULT_EDITOR = "nano"
 
 INSTRUCTIONS = """
 
-# Edit branch-creation plan.
+# Edit the integration plan.
 #
 # Commands:
-# u = use commit in single-commit branch
-# u@b<target-label> <commit> = use commit in single-commit branch off branch
-#                              with target-label
-# b<label> <commit> = use commit in labeled branch
-# b<label>@b<target-label> <commit> = use commit in labeled branch off branch
-#                                     with target-label
+# d<label> <commit> = use commit in labeled delta
+# d<label>@d<target-label> <commit> = use commit in labeled delta depending on
+#                                     delta with target-label
 # s <commit> = do not use commit
 #
 # If you delete a line, the commit will not be used (equivalent to "s")
-# If you remove everything, nothing will be changed
+# If you remove everything, the plan creation is aborted.
 #
 """
 
@@ -358,7 +355,7 @@ class App:
             except StopIteration:
                 pass
             if delta is not None:
-                command = f"b{d_i}"
+                command = f"d{d_i}"
                 if delta.target is not None:
                     target_i = sorted_deltas.index(delta.target)
                     command += f"@{target_i}"
@@ -412,11 +409,11 @@ class App:
                 try:
                     up_to_date = branch_up_to_date(branch)
                     click.echo(
-                        f"{'b' + str(i):>4}: "
+                        f"{'d' + str(i):>4}: "
                         f"{branch}{'' if up_to_date else ' (diverged)'}"
                     )
                 except NoRemoteTrackingBranch:
-                    click.echo(f"{'b' + str(i):>4}: {branch} (not pushed)")
+                    click.echo(f"{'d' + str(i):>4}: {branch} (not pushed)")
                 if show_targets:
                     target = tree[branch].target_branch_name
                     click.echo(f"{' ' * 6}@ {target}")
@@ -598,8 +595,8 @@ def _tokenize_plan(plan: str) -> typing.Iterable[_BranchCommand]:
             raise ParsingError(
                 "each line should contain at least a command and a commit SHA"
             )
-        if command.startswith("b"):
-            m = re.match(r"b([0-9]*)(@b?([0-9]*))?$", command)
+        if command.startswith("d"):
+            m = re.match(r"d([0-9]*)(@d?([0-9]*))?$", command)
             if not m:
                 raise ParsingError(f"unrecognized command: {command}")
             label, _, target = m.groups()
@@ -796,21 +793,21 @@ def cli():
     "--write",
     is_flag=True,
     type=bool,
-    help="Also detect current plan and write branches.",
+    help="Also detect the current plan and update the ephemeral branches.",
 )
 @click.option(
     "-i",
     "--interactive",
     is_flag=True,
     type=bool,
-    help="Choose which branches to push.",
+    help="Ask for confirmation before pushing each branch.",
 )
 @click.option(
     "-m",
     "--merge-request",
     is_flag=True,
     type=bool,
-    help="Use push-options to create a merge request (only works for Gitlab).",
+    help="Use Gitlab-compatible push-options to create a merge request.",
 )
 @click.option(
     "-c",
@@ -818,14 +815,26 @@ def cli():
     nargs=1,
     type=str,
     default=None,
-    help="Create a change request for a given integration.",
+    metavar="INTEGRATION",
+    help="Create a change request using the provided INTEGRATION.",
 )
 @inside_work_tree
 @pass_app
 def push(
     app, delta_references, write, interactive, merge_request, change_request
 ) -> None:
-    """Push deltas to the remote."""
+    """Push deltas to the remote.
+
+    The optional argument DELTA_REFERENCES is a list of delta references. If
+    provided, only these deltas as pushed.
+
+    A delta reference is resolved as follows: If it is a number (optionally
+    prefixed by 'd'), checkout the delta branch that has that label in the
+    output of `dfl status`.
+
+    If not a number, match against delta-branch names and if there is a unique
+    match, checkout that branch.
+    """
     if app.remote == "":
         raise click.ClickException("Remote must be set.")
     tree = app.reconstruct_tree()
@@ -974,7 +983,7 @@ def status(app, show_targets) -> None:
 def remix(app) -> None:
     """Alias for `git rebase -i <upstream>`.
 
-    Only works when on local.
+    Only works when on local branch.
     """
     hot_branches = app.get_hot_branches()
     subprocess.run(f"git rebase -i {app.upstream_name}", shell=True)
@@ -992,7 +1001,7 @@ def remix(app) -> None:
 def pull(app) -> None:
     """Alias for `git pull --rebase <upstream>`.
 
-    Only works when on local.
+    Only works when on local branch.
     """
     if app.remote == "":
         raise click.ClickException("Remote must be set.")
@@ -1014,26 +1023,27 @@ def log(app) -> None:
 
 @cli_group.command()
 @inside_work_tree
-@click.argument("delta-reference", required=False, default=None, type=str)
+@click.argument("reference", required=False, default=None, type=str)
 @pass_app
-def checkout(app, delta_reference) -> None:
+def checkout(app, reference) -> None:
     """Checkout deltas or the local branch.
 
-    If DELTA_REFERENCE is "local" or the name of your local branch, checkout
-    your local branch.
+    If REFERENCE isn't provided, "local", or the name of the local branch,
+    checkout the local branch.
 
-    If DELTA_REFERENCE is a number (optionally prefixed by 'b'), go to the
-    delta with that index.
+    Otherwise, REFERENCE is treated as a delta reference. If it is a number
+    (optionally prefixed by 'd'), checkout the delta branch that has that label
+    in the output of `dfl status`.
 
-    Otherwise, try to do a partial match against your delta branch names.
-    This only works if there is a unique match.
+    If not a number, match against delta-branch names and if there is a unique
+    match, checkout that branch.
     """
-    if delta_reference in ["local", app.local, None]:
+    if reference in ["local", app.local, None]:
         branch = app.local
     else:
         branches = app.get_delta_branches()
         try:
-            branch = resolve_delta(delta_reference, branches)
+            branch = resolve_delta(reference, branches)
         except ValueError as exc:
             raise click.ClickException(str(exc))
     subprocess.run(f"git checkout {branch}", shell=True)
@@ -1046,7 +1056,7 @@ def checkout(app, delta_reference) -> None:
 @no_hot_branch
 @undiverged
 def write(app) -> None:
-    """Update deltas based on the current plan."""
+    """Write ephemeral branches based on the current plan."""
     tree = app.reconstruct_tree()
     try:
         with utils.return_to_head():

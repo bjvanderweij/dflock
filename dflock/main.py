@@ -277,6 +277,7 @@ class App:
         otherwise create a stack of deltas.
         """
         commits = self._get_local_commits()
+        _validate_local_commits(commits)
         tree: dict[str, Delta] = {}
         target = None
         for commit in commits:
@@ -317,6 +318,7 @@ class App:
         record the final commit in the branch
         """
         commits = self._get_local_commits()
+        _validate_local_commits(commits)
         commits_by_message = {c.message: c for c in commits}
         local_branches = utils.get_local_branches()
         root = get_commits(self.upstream)[0]
@@ -341,6 +343,7 @@ class App:
 
     def render_plan(self, tree: dict[str, Delta], include_skipped=True) -> str:
         local_commits = self._get_local_commits()
+        _validate_local_commits(local_commits)
         sorted_deltas = list(
             sorted(tree.values(), key=lambda d: local_commits.index(d.commits[0]))
         )
@@ -386,6 +389,7 @@ class App:
     def get_delta_branches(self) -> list[str]:
         branches = utils.get_local_branches()
         commits = self._get_local_commits()
+        _validate_local_commits(commits)
         return [
             self.get_commit_branch_name(c)
             for c in commits
@@ -394,6 +398,7 @@ class App:
 
     def get_hot_branches(self) -> set[str]:
         commits = self._get_local_commits()
+        _validate_local_commits(commits)
         local_branches = utils.get_local_branches()
         return set(local_branches) & set(
             self.get_commit_branch_name(c) for c in commits
@@ -439,10 +444,6 @@ class App:
         if not utils.object_exists(self.local):
             raise click.ClickException(f"Local {self.local} does not exist")
         commits = get_commits_between(self.upstream_name, self.local)
-        if len(commits) != len(set(c.message for c in commits)):
-            raise click.ClickException(
-                "Duplicate commit messages found in local commits."
-            )
         return commits
 
     def _infer_delta_last_commit(
@@ -585,6 +586,11 @@ class App:
             valid_target_labels.add(d.label)
             deltas[d.label] = self._create_delta(d.commits, target_branch)
         return {b.branch_name: b for b in deltas.values()}
+
+
+def _validate_local_commits(commits):
+    if len(commits) != len(set(c.message for c in commits)):
+        raise click.ClickException("Duplicate commit messages found in local commits.")
 
 
 def _tokenize_plan(plan: str) -> typing.Iterable[_BranchCommand]:
@@ -985,8 +991,8 @@ def remix(app) -> None:
 
     Only works when on local branch.
     """
-    hot_branches = app.get_hot_branches()
     subprocess.run(f"git rebase -i {app.upstream_name}", shell=True)
+    hot_branches = app.get_hot_branches()
     app.prune_local_branches(hot_branches=hot_branches)
     click.echo(
         "Hint: if you changed or amended commits, you need to run `dfl write` to "

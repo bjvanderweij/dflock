@@ -298,7 +298,7 @@ class App:
         get local commits in chronological order
         get ephemeral branches
         for commit in local commits
-        if branch name exists as local branch
+        if commit has ephemeral branch
         get n preceding commits where n is index of commit in local commits
         iterate in reverse chronological order until you encounter either
         a commit corresponding to another branch already created or an unknown
@@ -309,13 +309,12 @@ class App:
         get local commits in chronological order
         get ephemeral branches
         for commit in local commits
-        if branch name exists as local branch
+        if commit has ephemeral branch
         get commits in branch from tip (n_local_commits - index_of_current_commit)
-            until hitting epynomous commit. Then check if previous commit is known
-            as final commit of branch
+            until hitting epynomous commit. Then check if previous commit is
+                a final commit of another branch
             If so, set corresponding branch as target
-            If not, preceding commit must be
-        record the final commit in the branch
+            If not, preceding commit must be last commit of upstream
         """
         commits = self._get_local_commits()
         _validate_local_commits(commits)
@@ -326,11 +325,11 @@ class App:
         for i, commit in enumerate(commits):
             if self.get_commit_branch_name(commit) in local_branches:
                 if self.anchor_commit == "first":
-                    delta = self._infer_delta_first_commit(
+                    delta = self._infer_delta_by_first_commit(
                         commit, i, commits_by_message, tree, root
                     )
                 else:
-                    delta = self._infer_delta_last_commit(
+                    delta = self._infer_delta_by_last_commit(
                         commit, i, commits_by_message, tree, root
                     )
                 tree[delta.branch_name] = delta
@@ -446,7 +445,7 @@ class App:
         commits = get_commits_between(self.upstream_name, self.local)
         return commits
 
-    def _infer_delta_last_commit(
+    def _infer_delta_by_last_commit(
         self,
         commit: Commit,
         i: int,
@@ -474,9 +473,9 @@ class App:
         # preceding commits in reverse order
         for cc in reversed(candidate_commits):
             branch_name = self.get_commit_branch_name(cc)
-            # When finding a commit whose branch name corresponds to
-            # a branch in the tree and it isn't the current commits branch
-            # name assume we've found the target branch and stop
+            # If the branch derived from the commit is in the tree and it's
+            # not the current commit's branch name, assume we've found the
+            # target branch and stop
             if branch_name in tree and (
                 branch_name != self.get_commit_branch_name(commit)
             ):
@@ -492,14 +491,14 @@ class App:
             else:
                 if cc.message != root.message:
                     click.echo(
-                        "warning: unknown commit message encountered on branch "
+                        "warning: unrecognized commit encountered on branch "
                         + f"{branch_name} "
                         + cc.short_message
                     )
                 break
         return self._create_delta(commits, target)
 
-    def _infer_delta_first_commit(
+    def _infer_delta_by_first_commit(
         self,
         commit: Commit,
         i: int,
@@ -508,13 +507,12 @@ class App:
         root: Commit,
     ) -> Delta:
         n_local = len(commits_by_message)
-        candidate_commits = get_last_n_commits(
-            self.get_commit_branch_name(commit), n_local - i + 1
-        )
+        branch_name = self.get_commit_branch_name(commit)
+        candidate_commits = get_last_n_commits(branch_name, n_local - i + 1)
         target = None
         branch_commits: list[Commit] = []
         start_index = [self.get_commit_branch_name(c) for c in candidate_commits].index(
-            self.get_commit_branch_name(commit)
+            branch_name
         )
         for delta in tree.values():
             if delta.commits[-1].message == candidate_commits[start_index - 1].message:
@@ -524,7 +522,11 @@ class App:
             if cc.message in commits_by_message:
                 branch_commits.append(commits_by_message[cc.message])
             else:
-                click.echo(f"warning: unknown commit message encountered: {cc.message}")
+                click.echo(
+                    "warning: unrecognized commit encountered on branch "
+                    + f"{branch_name} "
+                    + cc.short_message
+                )
                 break
         return self._create_delta(branch_commits, target)
 

@@ -436,24 +436,18 @@ class App:
             self.get_commit_branch_name(c) for c in commits
         )
 
-    def print_deltas(self, show_targets: bool = False, header="Deltas:") -> None:
-        branches = self.get_delta_branches()
-        if len(branches) > 0:
-            if show_targets:
-                tree = self.reconstruct_tree()
-            click.echo(header)
-            for i, branch in enumerate(branches):
-                try:
-                    up_to_date = branch_up_to_date(branch)
-                    click.echo(
-                        f"{'d' + str(i):>4}: "
-                        f"{branch}{'' if up_to_date else ' (diverged)'}"
-                    )
-                except NoRemoteTrackingBranch:
-                    click.echo(f"{'d' + str(i):>4}: {branch} (not pushed)")
-                if show_targets:
-                    target = tree[branch].target_branch_name
-                    click.echo(f"{' ' * 6}@ {target}")
+    def print_deltas(self, deltas: dict[str, None | str]) -> None:
+        for i, (branch, target) in enumerate(deltas.items()):
+            try:
+                up_to_date = branch_up_to_date(branch)
+                click.echo(
+                    f"{'d' + str(i):>4}: "
+                    f"{branch}{'' if up_to_date else ' (diverged)'}"
+                )
+            except NoRemoteTrackingBranch:
+                click.echo(f"{'d' + str(i):>4}: {branch} (not pushed)")
+            if target is not None:
+                click.echo(f"{' ' * 6}@ {target}")
 
     def _create_delta(
         self, commits: typing.Sequence[Commit], target: None | Delta
@@ -981,9 +975,11 @@ def plan(app, strategy, edit, show) -> None:
             tree = app.parse_plan(new_plan)
             with utils.return_to_head():
                 write_plan(tree)
-            app.print_deltas(header="Deltas written:")
-            click.echo("Run `dfl push` to push deltas to the remote.")
             app.prune_local_branches(tree=tree)
+            if len(tree) > 0:
+                click.echo("Deltas written:")
+            app.print_deltas(tree)
+            click.echo("Run `dfl push` to push deltas to the remote.")
         except (ParsingError, PlanError, CherryPickFailed) as exc:
             click.echo(f"Received plan:\n\n{new_plan}\n")
             exc.handle_in_cli()
@@ -1010,7 +1006,13 @@ def status(app, show_targets) -> None:
         click.echo("NOT on local branch.")
     if diverged:
         click.echo("Local and upstream have diverged")
-    app.print_deltas(show_targets, header="\nDeltas:")
+    if show_targets:
+        tree = app.reconstruct_tree()
+    else:
+        tree = {b: None for b in app.get_delta_branches()}
+    if len(tree) > 0:
+        click.echo("\nDeltas:")
+    app.print_deltas(tree)
 
 
 @cli_command
@@ -1101,7 +1103,9 @@ def write(app) -> None:
     tree = app.reconstruct_tree()
     with utils.return_to_head():
         write_plan(tree)
-    app.print_deltas(header="Deltas written:")
+    if len(tree) > 0:
+        click.echo("Deltas written")
+    app.print_deltas(tree)
     click.echo("Run `dfl push` to push deltas to the remote.")
 
 

@@ -179,16 +179,16 @@ class Commit(typing.NamedTuple):
         return cls(sha, " ".join(message_words))
 
     @property
-    def short_message(self):
+    def short_message(self) -> str:
         return self.message.split("\n")[0]
 
     @property
-    def short_str(self):
+    def short_str(self) -> str:
         return f"{self.sha[:8]} {self.short_message}"
 
 
 class Delta(typing.NamedTuple):
-    commits: list[Commit]
+    commits: tuple[Commit, ...]
     target: typing.Optional["Delta"]
     branch_name: str
     target_branch_name: str
@@ -246,7 +246,7 @@ class Delta(typing.NamedTuple):
         return command
 
     def __str__(self) -> str:
-        return "Branch {self.branch_name} with commits:" "\n".join(
+        return f"Branch {self.branch_name} with commits:\n" + "\n".join(
             f"\t{c.short_message}" for c in self.commits
         )
 
@@ -467,7 +467,7 @@ class App:
         target_branch_name = (
             self.upstream_name if target is None else target.branch_name
         )
-        return Delta(commits, target, branch_name, target_branch_name)
+        return Delta(tuple(commits), target, branch_name, target_branch_name)
 
     def _get_branch_commits(self, branch: None | str = None) -> list[Commit]:
         """Return all commits between upstream and branch.
@@ -667,7 +667,7 @@ def resolve_delta(name: str, branches: list[str]) -> str:
     raise ValueError(f"Could not match {name} to a unique branch")
 
 
-def write_plan(tree: dict[str, Delta]):
+def write_plan(tree: dict[str, Delta]) -> None:
     """Create feature branches based on the plan in tree.
 
     Start at the roots of the tree and for each branch in the topologically
@@ -684,7 +684,6 @@ def write_plan(tree: dict[str, Delta]):
         if delta.target is not None:
             dag[name].append(delta.target.branch_name)
     ts = TopologicalSorter(dag)
-    updated = {}
     for branch_name in ts.static_order():
         delta = tree[branch_name]
         utils.checkout(delta.target_branch_name)
@@ -699,10 +698,7 @@ def write_plan(tree: dict[str, Delta]):
                 raise
             if delta.branch_exists():
                 delta.delete_branch()
-                updated[branch_name] = True
             delta.create_branch()
-            updated[branch_name] = False
-    return updated
 
 
 def iterate_plan(plan: str):

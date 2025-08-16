@@ -274,7 +274,89 @@ def dag_commits(app, commit, create_branch):
     return app._get_branch_commits()
 
 
-def test_reconstruct_tree__anchor_commit(app, anchor_commit, dag_commits):
+def test_reconstruct_tree__unrecognized_commit(
+    app, anchor_commit, checkout, commit, capsys, dag_commits
+):
+    c1, c2, c3, c4 = dag_commits
+    plan = f"d0 {c1.short_str}\n" f"d0 {c2.short_str}\n"
+    tree = app.parse_plan(plan)
+    write_plan(tree)
+    branches = list(tree.keys())
+    checkout(branches[0])
+    # Commit to an ephemeral branch
+    message = "unfamiliar message"
+    commit(dict(a="d"), "unfamiliar message")
+    app.reconstruct_tree()
+    captured = capsys.readouterr()
+    assert (
+        f"WARNING: Unfamiliar commit message encountered on {branches[0]}: {message}."
+        in captured.err
+    )
+    if anchor_commit == "last":
+        assert (
+            f"WARNING: Branch name of inferred delta {branches[0]} is not consistent with last commit."
+            in captured.err
+        )
+
+
+def test_reconstruct_tree__missing_commits(
+    app, checkout, git_repository, capsys, dag_commits
+):
+    c1, c2, c3, c4 = dag_commits
+    plan = f"d0 {c1.short_str}\n" f"d0 {c2.short_str}\n"
+    app.anchor_commit = "last"
+    tree = app.parse_plan(plan)
+    write_plan(tree)
+    branches = list(tree.keys())
+    checkout(branches[0])
+    # Remove last two commits
+    utils.run("reset", "HEAD~1", cwd=git_repository)
+    app.reconstruct_tree()
+    captured = capsys.readouterr()
+    assert (
+        f"WARNING: Branch name of inferred delta {branches[0]} is not consistent with last commit."
+        == captured.err.strip()
+    )
+
+
+def test_reconstruct_tree__missing_all(
+    app, anchor_commit, checkout, git_repository, capsys, dag_commits
+):
+    c1, c2, c3, c4 = dag_commits
+    plan = f"d0 {c1.short_str}\n" f"d0 {c2.short_str}\n"
+    tree = app.parse_plan(plan)
+    write_plan(tree)
+    branches = list(tree.keys())
+    checkout(branches[0])
+    # Remove last two commits
+    utils.run("reset", "HEAD~2", cwd=git_repository)
+    with pytest.raises(GitStateError) as exc_info:
+        app.reconstruct_tree()
+    assert (
+        f"Cannot reconstruct tree: ephemeral branch {branches[0]} has no commits."
+        == str(exc_info.value)
+    )
+
+
+def test_reconstruct_tree__missing_one(
+    app, anchor_commit, checkout, git_repository, capsys, dag_commits
+):
+    c1, c2, c3, c4 = dag_commits
+    plan = f"d0 {c1.short_str}\n" f"d1@0 {c2.short_str}\n"
+    tree = app.parse_plan(plan)
+    write_plan(tree)
+    branches = list(tree.keys())
+    checkout(branches[1])
+    # Remove last two commits
+    utils.run("reset", "HEAD~1", cwd=git_repository)
+    with pytest.raises(GitStateError) as exc_info:
+        app.reconstruct_tree()
+    assert f"Cannot reconstruct tree: delta {branches[-1]} has no commits." == str(
+        exc_info.value
+    )
+
+
+def test_reconstruct_tree__anchor_commit(app, capsys, anchor_commit, dag_commits):
     c1, c2, c3, c4 = dag_commits
     plan = (
         f"d0 {c1.short_str}\n"
@@ -300,9 +382,11 @@ def test_reconstruct_tree__anchor_commit(app, anchor_commit, dag_commits):
             app.get_commit_branch_name(c3): d1,
             app.get_commit_branch_name(c4): d2,
         }
+    captured = capsys.readouterr()
+    assert "WARNING: " not in captured.err
 
 
-def test_reconstruct_tree(app, dag_commits, anchor_commit):
+def test_reconstruct_tree(app, capsys, dag_commits, anchor_commit):
     c1, c2, c3, c4 = dag_commits
     plan = (
         f"d0 {c1.short_str}\n"
@@ -323,9 +407,13 @@ def test_reconstruct_tree(app, dag_commits, anchor_commit):
         d1.branch_name: d1,
         d2.branch_name: d2,
     }
+    captured = capsys.readouterr()
+    assert "WARNING: " not in captured.err
 
 
-def test_reconstruct_tree_stacked(app, serially_dependent_commits, anchor_commit):
+def test_reconstruct_tree_stacked(
+    app, capsys, serially_dependent_commits, anchor_commit
+):
     c1, c2, c3, c4 = serially_dependent_commits
     tree = app.build_tree(stack=True)
     write_plan(tree)
@@ -348,6 +436,8 @@ def test_reconstruct_tree_stacked(app, serially_dependent_commits, anchor_commit
         d2.branch_name: d2,
         d3.branch_name: d3,
     }
+    captured = capsys.readouterr()
+    assert "WARNING: " not in captured.err
 
 
 @pytest.mark.parametrize("cmd", COMMANDS)

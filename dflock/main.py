@@ -324,52 +324,60 @@ class App:
                 target = delta
         return tree
 
+    def validate_ephemeral_branch(self, branch_name, commits, delta_commits):
+        unrecognized = set(c.message for c in commits) - set(
+            c.message for c in delta_commits
+        )
+        if len(unrecognized) > 0:
+            for message in unrecognized:
+                click.echo(
+                    f"WARNING: Unfamiliar commit message encountered on {branch_name}: {message}.",
+                    err=True,
+                )
+        if self.anchor_commit == "first":
+            anchor_commit_branch_name = self.get_commit_branch_name(commits[0])
+        else:
+            anchor_commit_branch_name = self.get_commit_branch_name(commits[-1])
+        if branch_name != anchor_commit_branch_name:
+            click.echo(
+                f"WARNING: Branch name of inferred delta {branch_name} is not consistent with {self.anchor_commit} commit.",
+                err=True,
+            )
+
     def reconstruct_tree(self) -> dict[str, Delta]:
-        """Use local commits to reconstruct the plan.
-
-        Assumes that the commits in ephemeral branches have the same commit messages
-        as commits in local commits.
-
-        Algorithm when branch name is derived from last commit:
-
-        get local commits in chronological order
-        get ephemeral branches
-        for commit in local commits
-        if commit has ephemeral branch
-        get n preceding commits where n is index of commit in local commits
-        iterate in reverse chronological order until you encounter either
-        a commit corresponding to another branch already created or an unknown
-        commit.
-
-        when name is derived from first commit:
-
-        get local commits in chronological order
-        get ephemeral branches
-        for commit in local commits
-        if commit has ephemeral branch
-        get commits in branch from tip (n_local_commits - index_of_current_commit)
-            until hitting epynomous commit. Then check if previous commit is
-                a final commit of another branch
-            If so, set corresponding branch as target
-            If not, preceding commit must be last commit of upstream
-        """
-        commits = self._get_branch_commits()
-        commits_by_message = {c.message: c for c in commits}
+        local_commits = self._get_branch_commits()
         local_branches = utils.get_local_branches()
-        root = get_commits(self.upstream)[0]
-        tree: dict[str, Delta] = {}
-        for i, commit in enumerate(commits):
-            if self.get_commit_branch_name(commit) in local_branches:
-                if self.anchor_commit == "first":
-                    delta = self._infer_delta_by_first_commit(
-                        commit, i, commits_by_message, tree, root
+        branch_names_by_last_commit: dict[str, str] = {}
+        deltas: dict[str, Delta] = {}
+        for commit in local_commits:
+            branch_name = self.get_commit_branch_name(commit)
+            if branch_name in local_branches:
+                commits = self._get_branch_commits(branch_name)
+                if len(commits) == 0:
+                    raise GitStateError(
+                        f"Cannot reconstruct tree: ephemeral branch {branch_name} has no commits."
                     )
-                else:
-                    delta = self._infer_delta_by_last_commit(
-                        commit, i, commits_by_message, tree, root
+                messages = [c.message for c in commits]
+                target: Delta | None = None
+                delta_start = 0
+                for i, msg in enumerate(reversed(messages)):
+                    if msg in branch_names_by_last_commit:
+                        target = deltas[branch_names_by_last_commit[msg]]
+                        delta_start = len(messages) - i
+                        break
+                branch_names_by_last_commit[commits[-1].message] = branch_name
+                delta_commits = [
+                    c for c in local_commits if c.message in messages[delta_start:]
+                ]
+                if len(delta_commits) == 0:
+                    raise GitStateError(
+                        f"Cannot reconstruct tree: delta {branch_name} has no commits."
                     )
-                tree[delta.branch_name] = delta
-        return tree
+                self.validate_ephemeral_branch(
+                    branch_name, commits[delta_start:], delta_commits
+                )
+                deltas[branch_name] = self._create_delta(delta_commits, target)
+        return deltas
 
     def parse_plan(self, plan: str) -> dict[str, Delta]:
         tokens = _tokenize_plan(plan)
@@ -378,27 +386,23 @@ class App:
 
     def render_plan(self, tree: dict[str, Delta], include_skipped=True) -> str:
         local_commits = self._get_branch_commits()
-        sorted_deltas = list(
-            sorted(tree.values(), key=lambda d: local_commits.index(d.commits[0]))
+        sorted_deltas = sorted(
+            tree.values(), key=lambda d: local_commits.index(d.commits[0])
         )
+        delta_indices = {d: i for i, d in enumerate(sorted_deltas)}
         lines = []
         for commit in local_commits:
             command = "s"
-            delta = None
-            try:
-                d_i, delta = next(
-                    (i, d) for i, d in enumerate(sorted_deltas) if commit in d.commits
-                )
-            except StopIteration:
-                pass
-            if delta is not None:
-                command = f"d{d_i}"
-                if delta.target is not None:
-                    target_i = sorted_deltas.index(delta.target)
-                    command += f"@{target_i}"
-                lines.append(f"{command} {commit.short_str}")
-            elif include_skipped:
-                lines.append(f"{command} {commit.short_str}")
+            for delta, index in delta_indices.items():
+                if commit in delta.commits:
+                    command = f"d{index}"
+                    if delta.target is not None:
+                        command += f"@{delta_indices[delta.target]}"
+                    lines.append(f"{command} {commit.short_str}")
+                    break
+            else:
+                if include_skipped:
+                    lines.append(f"s {commit.short_str}")
         return "\n".join(lines)
 
     def prune_local_branches(
@@ -472,91 +476,6 @@ class App:
             branch = self.local
         commits = get_commits_between(self.upstream_name, branch)
         return commits
-
-    def _infer_delta_by_last_commit(
-        self,
-        commit: Commit,
-        i: int,
-        commits_by_message,
-        tree: dict[str, Delta],
-        root: Commit,
-    ) -> Delta:
-        candidate_commits = get_last_n_commits(
-            self.get_commit_branch_name(commit), i + 1
-        )
-        if self.get_commit_branch_name(
-            candidate_commits[-1]
-        ) != self.get_commit_branch_name(commit):
-            raise click.ClickException(
-                "Invalid state: dflock-managed branch name "
-                f"{self.get_commit_branch_name(commit)} does not match branch "
-                "name expected based on its last commit.\n\nRun\n\ngit branch "
-                "-D {commit.branch_name(self.branch_template)}\n\nto remove the "
-                "offending branch. Or run\n\ndfl reset\n\nif you'd like to start "
-                "with a clean slate."
-            )
-        target = None
-        commits: list[Commit] = []
-        # Find the first commit of the branch by iterating through
-        # preceding commits in reverse order
-        for cc in reversed(candidate_commits):
-            branch_name = self.get_commit_branch_name(cc)
-            # If the branch derived from the commit is in the tree and it's
-            # not the current commit's branch name, assume we've found the
-            # target branch and stop
-            if branch_name in tree and (
-                branch_name != self.get_commit_branch_name(commit)
-            ):
-                target = tree[self.get_commit_branch_name(cc)]
-                break
-            # if we find a commit that is in the commits by message
-            elif cc.message in commits_by_message:
-                commits.insert(0, commits_by_message[cc.message])
-            # either we've reached the bottom of the tree, in which case
-            # the preceding commits should be the same as the tip of
-            # remote. If not, a commit has been renamed
-            # No biggie, just print a warning
-            else:
-                if cc.message != root.message:
-                    click.echo(
-                        "warning: unrecognized commit encountered on branch "
-                        + f"{branch_name} "
-                        + cc.short_message
-                    )
-                break
-        return self._create_delta(commits, target)
-
-    def _infer_delta_by_first_commit(
-        self,
-        commit: Commit,
-        i: int,
-        commits_by_message: dict[str, Commit],
-        tree: dict[str, Delta],
-        root: Commit,
-    ) -> Delta:
-        n_local = len(commits_by_message)
-        branch_name = self.get_commit_branch_name(commit)
-        candidate_commits = get_last_n_commits(branch_name, n_local - i + 1)
-        target = None
-        branch_commits: list[Commit] = []
-        start_index = [self.get_commit_branch_name(c) for c in candidate_commits].index(
-            branch_name
-        )
-        for delta in tree.values():
-            if delta.commits[-1].message == candidate_commits[start_index - 1].message:
-                target = delta
-                break
-        for cc in candidate_commits[start_index:]:
-            if cc.message in commits_by_message:
-                branch_commits.append(commits_by_message[cc.message])
-            else:
-                click.echo(
-                    "warning: unrecognized commit encountered on branch "
-                    + f"{branch_name} "
-                    + cc.short_message
-                )
-                break
-        return self._create_delta(branch_commits, target)
 
     def _make_commit_lists(
         self,

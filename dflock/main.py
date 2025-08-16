@@ -36,13 +36,30 @@ INSTRUCTIONS = """
 """
 
 
-def on_local(f):
+def local_and_upstream_exist(f):
     @functools.wraps(f)
     def wrapper(app, *args, **kwargs):
+        if not utils.object_exists(app.local):
+            hints = ["use `dflock init` to configure dflock."]
+            raise GitStateError(f"Local {app.local} does not exist.", hints=hints)
+        if not utils.object_exists(app.upstream_name):
+            hints = ["use `dflock init` to configure dflock."]
+            raise GitStateError(
+                f"Upstream {app.upstream_name} does not exist.", hints=hints
+            )
+        return f(app, *args, **kwargs)
+
+    return wrapper
+
+
+def on_local(f):
+    @functools.wraps(f)
+    @local_and_upstream_exist
+    def wrapper(app, *args, **kwargs):
         if utils.get_current_branch() != app.local:
-            click.echo("Hint: Use `dfl checkout local` to return to local.")
-            raise click.ClickException(
-                f"You must be on your the local branch: {app.local}"
+            hints = ["use `dfl checkout local` to return to local."]
+            raise GitStateError(
+                f"You must be on your the local branch: {app.local}.", hints=hints
             )
         return f(app, *args, **kwargs)
 
@@ -71,12 +88,27 @@ def no_hot_branch(f) -> typing.Callable:
     return wrapper
 
 
+def valid_local_commits(f):
+    @functools.wraps(f)
+    @local_and_upstream_exist
+    def wrapper(app, *args, **kwargs):
+        commits = app._get_branch_commits()
+        if len(commits) != len(set(c.message for c in commits)):
+            hints = ["use `dfl remix` to edit local commit messages."]
+            raise GitStateError(
+                "Duplicate commit messages found in local commits.", hints=hints
+            )
+        return f(app, *args, **kwargs)
+
+    return wrapper
+
+
 def undiverged(f):
     @functools.wraps(f)
     def wrapper(app, *args, **kwargs):
         if utils.have_diverged(app.upstream_name, app.local):
-            click.echo("Hint: Use `dfl pull` to pull upstream changes into local.")
-            raise click.ClickException("Your local and upstream have diverged.")
+            hints = ["use `dfl pull` to pull upstream changes into local."]
+            raise GitStateError("Your local and upstream have diverged.", hints=hints)
         return f(app, *args, **kwargs)
 
     return wrapper
@@ -97,7 +129,8 @@ def clean_work_tree(f):
     def wrapper(*args, **kwargs):
         result = utils.run("status", "--untracked-files=no", "--porcelain")
         if bool(result.strip()):
-            raise click.ClickException("Work tree not clean.")
+            hints = ["use `git stash` to stash uncommitted changes."]
+            raise GitStateError("Work tree not clean.", hints=hints)
         return f(*args, **kwargs)
 
     return wrapper
@@ -105,13 +138,14 @@ def clean_work_tree(f):
 
 class DflockException(Exception):
     def __init__(self, *args, hints: None | list[str] = None, **kwargs):
-        self.hints = hints
+        self.hints = [] if hints is None else hints
         super().__init__(*args, **kwargs)
 
-    def emit_hints(self):
-        if self.hints is not None:
-            for hint in self.hints:
-                click.echo(f"Hint: {hint}")
+    def handle_in_cli(self):
+        msg = str(self)
+        if len(self.hints) > 0:
+            msg += "\n" + "\n".join(f"Hint: {h}" for h in self.hints)
+        raise click.ClickException(msg)
 
 
 class ParsingError(DflockException):
@@ -127,6 +161,10 @@ class CherryPickFailed(DflockException):
 
 
 class NoRemoteTrackingBranch(DflockException):
+    pass
+
+
+class GitStateError(DflockException):
     pass
 
 
@@ -276,8 +314,7 @@ class App:
         If stack is False, treat every commit as an independent delta,
         otherwise create a stack of deltas.
         """
-        commits = self._get_local_commits()
-        _validate_local_commits(commits)
+        commits = self._get_branch_commits()
         tree: dict[str, Delta] = {}
         target = None
         for commit in commits:
@@ -316,8 +353,7 @@ class App:
             If so, set corresponding branch as target
             If not, preceding commit must be last commit of upstream
         """
-        commits = self._get_local_commits()
-        _validate_local_commits(commits)
+        commits = self._get_branch_commits()
         commits_by_message = {c.message: c for c in commits}
         local_branches = utils.get_local_branches()
         root = get_commits(self.upstream)[0]
@@ -341,8 +377,7 @@ class App:
         return self._build_tree(commit_lists)
 
     def render_plan(self, tree: dict[str, Delta], include_skipped=True) -> str:
-        local_commits = self._get_local_commits()
-        _validate_local_commits(local_commits)
+        local_commits = self._get_branch_commits()
         sorted_deltas = list(
             sorted(tree.values(), key=lambda d: local_commits.index(d.commits[0]))
         )
@@ -387,8 +422,7 @@ class App:
 
     def get_delta_branches(self) -> list[str]:
         branches = utils.get_local_branches()
-        commits = self._get_local_commits()
-        _validate_local_commits(commits)
+        commits = self._get_branch_commits()
         return [
             self.get_commit_branch_name(c)
             for c in commits
@@ -396,8 +430,7 @@ class App:
         ]
 
     def get_hot_branches(self) -> set[str]:
-        commits = self._get_local_commits()
-        _validate_local_commits(commits)
+        commits = self._get_branch_commits()
         local_branches = utils.get_local_branches()
         return set(local_branches) & set(
             self.get_commit_branch_name(c) for c in commits
@@ -436,13 +469,14 @@ class App:
         )
         return Delta(commits, target, branch_name, target_branch_name)
 
-    def _get_local_commits(self) -> list[Commit]:
-        """Return all commits between upstream and local."""
-        if not utils.object_exists(self.upstream_name):
-            raise click.ClickException(f"Upstream {self.upstream_name} does not exist")
-        if not utils.object_exists(self.local):
-            raise click.ClickException(f"Local {self.local} does not exist")
-        commits = get_commits_between(self.upstream_name, self.local)
+    def _get_branch_commits(self, branch: None | str = None) -> list[Commit]:
+        """Return all commits between upstream and branch.
+
+        If branch is None, the local branch is used.
+        """
+        if branch is None:
+            branch = self.local
+        commits = get_commits_between(self.upstream_name, branch)
         return commits
 
     def _infer_delta_by_last_commit(
@@ -536,7 +570,7 @@ class App:
     ) -> list[_CommitList]:
         """Build lists of contiguous commits belonging to a branch."""
         branches: list[_CommitList] = []
-        local_commits = iter(self._get_local_commits())
+        local_commits = iter(self._get_branch_commits())
         for bc in branch_commands:
             if len(branches) == 0 or bc.label != branches[-1].label:
                 branches.append(_CommitList(bc.label, None, []))
@@ -575,7 +609,7 @@ class App:
         valid_target_labels: set[None | str] = {None}
         for d in candidate_deltas:
             if d.target_label not in valid_target_labels:
-                hints = ["re-order commits with `dfl remix`"]
+                hints = ["re-order commits with `dfl remix`."]
                 raise PlanError(
                     f'invalid target for "{d.label}": "{d.target_label}"', hints=hints
                 )
@@ -588,11 +622,6 @@ class App:
             valid_target_labels.add(d.label)
             deltas[d.label] = self._create_delta(d.commits, target_branch)
         return {b.branch_name: b for b in deltas.values()}
-
-
-def _validate_local_commits(commits):
-    if len(commits) != len(set(c.message for c in commits)):
-        raise click.ClickException("Duplicate commit messages found in local commits.")
 
 
 def _tokenize_plan(plan: str) -> typing.Iterable[_BranchCommand]:
@@ -666,7 +695,7 @@ def write_plan(tree: dict[str, Delta]):
                 try:
                     utils.run("cherry-pick", "--abort")
                 except subprocess.CalledProcessError:
-                    click.echo("Failed to abort cherry-pick.", err=True)
+                    click.echo("WARNING: Failed to abort cherry-pick.", err=True)
                 raise
             if delta.branch_exists():
                 delta.delete_branch()
@@ -781,6 +810,18 @@ def cli_group(ctx, config):
     ctx.obj["config"] = config
 
 
+def cli_command(f):
+    @cli_group.command
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except (GitStateError, CherryPickFailed) as exc:
+            exc.handle_in_cli()
+
+    return wrapper
+
+
 def cli():
     try:
         cli_group()
@@ -790,7 +831,7 @@ def cli():
         raise
 
 
-@cli_group.command
+@cli_command
 @click.argument(
     "delta-references",
     nargs=-1,
@@ -828,6 +869,7 @@ def cli():
 )
 @inside_work_tree
 @pass_app
+@valid_local_commits
 def push(
     app, delta_references, write, interactive, merge_request, change_request
 ) -> None:
@@ -847,12 +889,8 @@ def push(
         raise click.ClickException("Remote must be set.")
     tree = app.reconstruct_tree()
     if write:
-        try:
-            with utils.return_to_head():
-                write_plan(tree)
-        except CherryPickFailed as exc:
-            exc.emit_hints()
-            raise click.ClickException(str(exc))
+        with utils.return_to_head():
+            write_plan(tree)
         click.echo("Delta branches updated.")
     deltas = list(tree.values())
     if len(delta_references) > 0:
@@ -882,7 +920,7 @@ def push(
                 subprocess.run(command, shell=True)
 
 
-@cli_group.command()
+@cli_command
 @click.argument(
     "strategy",
     type=click.Choice(["detect", "stack", "flat", "empty"]),
@@ -905,6 +943,7 @@ def push(
 @inside_work_tree
 @pass_app
 @clean_work_tree
+@valid_local_commits
 @no_hot_branch
 @undiverged
 def plan(app, strategy, edit, show) -> None:
@@ -951,11 +990,10 @@ def plan(app, strategy, edit, show) -> None:
             app.prune_local_branches(tree=tree)
         except (ParsingError, PlanError, CherryPickFailed) as exc:
             click.echo(f"Received plan:\n\n{new_plan}\n")
-            exc.emit_hints()
-            raise click.ClickException(str(exc))
+            exc.handle_in_cli()
 
 
-@cli_group.command()
+@cli_command
 @click.option(
     "-t",
     "--show-targets",
@@ -965,12 +1003,9 @@ def plan(app, strategy, edit, show) -> None:
 )
 @inside_work_tree
 @pass_app
+@local_and_upstream_exist
 def status(app, show_targets) -> None:
     """Show status of delta branches."""
-    if not utils.object_exists(app.upstream):
-        raise click.ClickException(f"Upstream {app.upstream} does not exist")
-    if not utils.object_exists(app.local):
-        raise click.ClickException(f"Local {app.local} does not exist")
     diverged = utils.have_diverged(app.upstream_name, app.local)
     on_local = utils.get_current_branch() == app.local
     if on_local:
@@ -982,7 +1017,7 @@ def status(app, show_targets) -> None:
     app.print_deltas(show_targets, header="\nDeltas:")
 
 
-@cli_group.command()
+@cli_command
 @inside_work_tree
 @clean_work_tree
 @pass_app
@@ -1002,9 +1037,10 @@ def remix(app) -> None:
     )
 
 
-@cli_group.command()
+@cli_command
 @inside_work_tree
 @pass_app
+@valid_local_commits
 @on_local
 def pull(app) -> None:
     """Alias for `git pull --rebase <upstream>`.
@@ -1018,7 +1054,7 @@ def pull(app) -> None:
     app.prune_local_branches(hot_branches=hot_branches)
 
 
-@cli_group.command()
+@cli_command
 @inside_work_tree
 @pass_app
 @undiverged
@@ -1029,10 +1065,11 @@ def log(app) -> None:
     subprocess.run(f"git log {app.local} ^{app.upstream_name}", shell=True)
 
 
-@cli_group.command()
+@cli_command
 @inside_work_tree
 @click.argument("reference", required=False, default=None, type=str)
 @pass_app
+@local_and_upstream_exist
 def checkout(app, reference) -> None:
     """Checkout deltas or the local branch.
 
@@ -1057,7 +1094,7 @@ def checkout(app, reference) -> None:
     subprocess.run(f"git checkout {branch}", shell=True)
 
 
-@cli_group.command()
+@cli_command
 @inside_work_tree
 @clean_work_tree
 @pass_app
@@ -1066,20 +1103,17 @@ def checkout(app, reference) -> None:
 def write(app) -> None:
     """Write ephemeral branches based on the current plan."""
     tree = app.reconstruct_tree()
-    try:
-        with utils.return_to_head():
-            write_plan(tree)
-    except CherryPickFailed as exc:
-        exc.emit_hints()
-        raise click.ClickException(str(exc))
+    with utils.return_to_head():
+        write_plan(tree)
     app.print_deltas(header="Deltas written:")
     click.echo("Run `dfl push` to push deltas to the remote.")
 
 
-@cli_group.command()
+@cli_command
 @click.option("-y", "--yes", is_flag=True, help="Do not ask for confirmation.")
 @click.pass_context
 @inside_work_tree
+@local_and_upstream_exist
 def reset(app, yes) -> None:
     """Reset the plan.
 
@@ -1099,7 +1133,7 @@ def reset(app, yes) -> None:
             utils.run("branch", "-D", branch_name)
 
 
-@cli_group.command()
+@cli_command
 @inside_work_tree
 def init() -> None:
     paths = get_config_paths()

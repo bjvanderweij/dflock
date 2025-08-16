@@ -2,13 +2,16 @@ from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
 from dflock import utils
 from dflock.main import (
     App,
+    CherryPickFailed,
     Commit,
+    GitStateError,
     ParsingError,
     PlanError,
     cli_group,
@@ -118,7 +121,17 @@ def commit_c(git_repository):
 @pytest.fixture()
 def local_commits():
     commits = [Commit("0", "a"), Commit("1", "b"), Commit("2", "c"), Commit("3", "d")]
-    with patch("dflock.main.App._get_local_commits", return_value=commits):
+
+    def branch_must_be_none(branch=None):
+        assert (
+            branch is None
+        ), "this patch should not be used for _get_branch_commits with an argument"
+        return commits
+
+    with patch(
+        "dflock.main.App._get_branch_commits",
+        side_effect=branch_must_be_none,
+    ):
         yield commits
 
 
@@ -230,7 +243,7 @@ def independent_commits(app, commit, create_branch):
     commit(dict(c="c"), "3")
     commit(dict(d="d"), "4")
     create_branch(LOCAL)
-    return app._get_local_commits()
+    return app._get_branch_commits()
 
 
 @pytest.fixture
@@ -242,7 +255,7 @@ def serially_dependent_commits(app, commit, create_branch):
     commit(dict(a="d"), "3")
     commit(dict(a="e"), "4")
     create_branch(LOCAL)
-    return app._get_local_commits()
+    return app._get_branch_commits()
 
 
 @pytest.fixture
@@ -254,7 +267,7 @@ def dag_commits(app, commit, create_branch):
     commit(dict(b="a"), "3")
     commit(dict(a="d"), "4")
     create_branch(LOCAL)
-    return app._get_local_commits()
+    return app._get_branch_commits()
 
 
 @pytest.mark.parametrize("anchor_commit", ["first", "last"])
@@ -399,7 +412,7 @@ def test_plan__duplicate_commit_names(
     create_branch(LOCAL)
     result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
-    assert "Error: Duplicate commit messages found in local commits." in result.output
+    assert "Duplicate commit messages found in local commits." in result.output
 
 
 def test_plan__diverged(runner, git_repository, commit, checkout, create_branch):
@@ -417,7 +430,7 @@ def test_plan__nonexistent_upstream(runner, git_repository, commit, create_branc
     create_branch(LOCAL)
     result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
-    assert f"Error: Upstream {UPSTREAM} does not exist" in result.output
+    assert f"Upstream {UPSTREAM} does not exist" in result.output
 
 
 def test_plan__nonexistent_local(runner, git_repository, commit, create_branch):
@@ -425,7 +438,7 @@ def test_plan__nonexistent_local(runner, git_repository, commit, create_branch):
     create_branch(UPSTREAM)
     result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
-    assert f"Error: Local {LOCAL} does not exist" in result.output
+    assert f"Local {LOCAL} does not exist" in result.output
 
 
 def test_plan__work_tree_not_clean(runner, git_repository, commit, create_branch):
@@ -437,7 +450,7 @@ def test_plan__work_tree_not_clean(runner, git_repository, commit, create_branch
         f.write("ab")
     result = runner.invoke(cli_group, ["plan"])
     assert result.exit_code == 1
-    assert "Error: Work tree not clean." in result.output
+    assert "Work tree not clean." in result.output
 
 
 def test_reconstruct_tree_branch_label_first(app, commit, create_branch):
@@ -448,7 +461,7 @@ def test_reconstruct_tree_branch_label_first(app, commit, create_branch):
     commit(dict(b="a"), "3")
     commit(dict(a="bb"), "4")
     create_branch(LOCAL)
-    c1, c2, c3, c4 = app._get_local_commits()
+    c1, c2, c3, c4 = app._get_branch_commits()
     plan = f"""
     d {c1.sha} {c1.short_message}
     d {c2.sha} {c2.short_message}

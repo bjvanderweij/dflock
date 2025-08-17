@@ -166,6 +166,12 @@ def checkout(git_repository):
     return _checkout
 
 
+@pytest.fixture(params=["first", "last"])
+def anchor_commit(app, request):
+    app.anchor_commit = request.param
+    return app.anchor_commit
+
+
 def test_parse_plan__syntax_errors(app, local_commits):
     with pytest.raises(ParsingError):
         app.parse_plan("s 0 a\na 1 b\ns 2 v") == {}
@@ -196,9 +202,7 @@ def test_parse_plan__illegal_plans(app, local_commits):
         app.parse_plan("d 0 a\nd1@ 1 foo\nd2 2 v") == {}
 
 
-@pytest.mark.parametrize("anchor_commit", ["first", "last"])
 def test_parse_plan__legal_plans(app, local_commits, anchor_commit):
-    app.anchor_commit = anchor_commit
     a, b, c, d = local_commits
     # Equivalent plans
     delta = app._create_delta([c], None)
@@ -270,7 +274,6 @@ def dag_commits(app, commit, create_branch):
     return app._get_branch_commits()
 
 
-@pytest.mark.parametrize("anchor_commit", ["first", "last"])
 def test_reconstruct_tree__anchor_commit(app, anchor_commit, dag_commits):
     c1, c2, c3, c4 = dag_commits
     plan = (
@@ -279,7 +282,6 @@ def test_reconstruct_tree__anchor_commit(app, anchor_commit, dag_commits):
         f"d1 {c3.short_str}\n"
         f"d2@0 {c4.short_str}"
     )
-    app.anchor_commit = anchor_commit
     tree = app.parse_plan(plan)
     write_plan(tree)
     reconstructed_tree = app.reconstruct_tree()
@@ -300,7 +302,6 @@ def test_reconstruct_tree__anchor_commit(app, anchor_commit, dag_commits):
         }
 
 
-@pytest.mark.parametrize("anchor_commit", ["first", "last"])
 def test_reconstruct_tree(app, dag_commits, anchor_commit):
     c1, c2, c3, c4 = dag_commits
     plan = (
@@ -324,7 +325,6 @@ def test_reconstruct_tree(app, dag_commits, anchor_commit):
     }
 
 
-@pytest.mark.parametrize("anchor_commit", ["first", "last"])
 def test_reconstruct_tree_stacked(app, serially_dependent_commits, anchor_commit):
     c1, c2, c3, c4 = serially_dependent_commits
     tree = app.build_tree(stack=True)
@@ -362,10 +362,8 @@ def test_plan__not_a_git_repo(cmd):
     assert "No git repository detected." in result.output
 
 
-@pytest.mark.parametrize("anchor_commit", ["first", "last"])
 def test_reconstruct_tree_independent(app, independent_commits, anchor_commit):
     c1, c2, c3, c4 = independent_commits
-    app.anchor_commit = anchor_commit
     tree = app.build_tree(stack=False)
     write_plan(tree)
     reconstructed_tree = app.reconstruct_tree()

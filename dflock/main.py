@@ -59,7 +59,7 @@ def on_local(f):
         if utils.get_current_branch() != app.local:
             hints = ["use `dfl checkout local` to return to local."]
             raise GitStateError(
-                f"You must be on your the local branch: {app.local}.", hints=hints
+                f"you must be on the local branch: {app.local}.", hints=hints
             )
         return f(app, *args, **kwargs)
 
@@ -340,7 +340,7 @@ class App:
             anchor_commit_branch_name = self.get_commit_branch_name(commits[-1])
         if branch_name != anchor_commit_branch_name:
             click.echo(
-                f"WARNING: Branch name of inferred delta {branch_name} is not consistent with {self.anchor_commit} commit.",
+                f"WARNING: Branch name of inferred delta {branch_name} is inconsistent with {self.anchor_commit} commit.",
                 err=True,
             )
 
@@ -355,7 +355,7 @@ class App:
                 commits = self._get_branch_commits(branch_name)
                 if len(commits) == 0:
                     raise GitStateError(
-                        f"Cannot reconstruct tree: ephemeral branch {branch_name} has no commits."
+                        f"Ephemeral branch {branch_name} has no commits."
                     )
                 messages = [c.message for c in commits]
                 target: Delta | None = None
@@ -370,9 +370,7 @@ class App:
                     c for c in local_commits if c.message in messages[delta_start:]
                 ]
                 if len(delta_commits) == 0:
-                    raise GitStateError(
-                        f"Cannot reconstruct tree: delta {branch_name} has no commits."
-                    )
+                    raise GitStateError(f"No local commits on delta {branch_name}.")
                 self.validate_ephemeral_branch(
                     branch_name, commits[delta_start:], delta_commits
                 )
@@ -897,7 +895,7 @@ def plan(app, strategy, edit, show) -> None:
             app.prune_local_branches(tree=tree)
             if len(tree) > 0:
                 click.echo("Deltas written:")
-            app.print_deltas(tree)
+            app.print_deltas({b: None for b in tree.keys()})
             click.echo("Run `dfl push` to push deltas to the remote.")
         except (ParsingError, PlanError, CherryPickFailed) as exc:
             click.echo(f"Received plan:\n\n{new_plan}\n")
@@ -1024,7 +1022,7 @@ def write(app) -> None:
         write_plan(tree)
     if len(tree) > 0:
         click.echo("Deltas written")
-    app.print_deltas(tree)
+    app.print_deltas({b: None for b in tree.keys()})
     click.echo("Run `dfl push` to push deltas to the remote.")
 
 

@@ -1028,7 +1028,7 @@ def write(app) -> None:
 
 @cli_command
 @click.option("-y", "--yes", is_flag=True, help="Do not ask for confirmation.")
-@click.pass_context
+@pass_app
 @inside_work_tree
 @local_and_upstream_exist
 def reset(app, yes) -> None:
@@ -1053,6 +1053,7 @@ def reset(app, yes) -> None:
 @cli_command
 @inside_work_tree
 def init() -> None:
+    """Interactively configure dflock."""
     paths = get_config_paths()
     for path in paths:
         if path.exists():

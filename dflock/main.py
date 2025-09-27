@@ -40,10 +40,10 @@ def local_and_upstream_exist(f):
     @functools.wraps(f)
     def wrapper(app, *args, **kwargs):
         if not utils.object_exists(app.local):
-            hints = ["use `dflock init` to configure dflock."]
+            hints = ['use "dflock init" to configure dflock.']
             raise GitStateError(f"Local {app.local} does not exist.", hints=hints)
         if not utils.object_exists(app.upstream_name):
-            hints = ["use `dflock init` to configure dflock."]
+            hints = ['use "dflock init" to configure dflock.']
             raise GitStateError(
                 f"Upstream {app.upstream_name} does not exist.", hints=hints
             )
@@ -57,7 +57,7 @@ def on_local(f):
     @local_and_upstream_exist
     def wrapper(app, *args, **kwargs):
         if utils.get_current_branch() != app.local:
-            hints = ["use `dfl checkout local` to return to local."]
+            hints = ['use "dfl checkout local" to return to local.']
             raise GitStateError(
                 f"you must be on the local branch: {app.local}.", hints=hints
             )
@@ -94,7 +94,7 @@ def valid_local_commits(f):
     def wrapper(app, *args, **kwargs):
         commits = app._get_branch_commits()
         if len(commits) != len(set(c.message for c in commits)):
-            hints = ["use `dfl remix` to edit local commit messages."]
+            hints = ['use "dfl remix" to edit local commit messages.']
             raise GitStateError(
                 "Duplicate commit messages found in local commits.", hints=hints
             )
@@ -107,7 +107,7 @@ def undiverged(f):
     @functools.wraps(f)
     def wrapper(app, *args, **kwargs):
         if utils.have_diverged(app.upstream_name, app.local):
-            hints = ["use `dfl pull` to pull upstream changes into local."]
+            hints = ['use "dfl pull" to pull upstream changes into local.']
             raise GitStateError("Your local and upstream have diverged.", hints=hints)
         return f(app, *args, **kwargs)
 
@@ -129,7 +129,7 @@ def clean_work_tree(f):
     def wrapper(*args, **kwargs):
         result = utils.run("status", "--untracked-files=no", "--porcelain")
         if bool(result.strip()):
-            hints = ["use `git stash` to stash uncommitted changes."]
+            hints = ['use "git stash" to stash uncommitted changes.']
             raise GitStateError("Work tree not clean.", hints=hints)
         return f(*args, **kwargs)
 
@@ -520,7 +520,7 @@ class App:
         valid_target_labels: set[None | str] = {None}
         for d in candidate_deltas:
             if d.target_label not in valid_target_labels:
-                hints = ["re-order commits with `dfl remix`."]
+                hints = ['re-order commits with "dfl remix".']
                 raise PlanError(
                     f'invalid target for "{d.label}": "{d.target_label}"', hints=hints
                 )
@@ -785,9 +785,10 @@ def push(
     The optional argument DELTA_REFERENCES is a list of delta references. If
     provided, only these deltas as pushed.
 
-    A delta reference is resolved as follows: If it is a number (optionally
-    prefixed by 'd'), checkout the delta branch that has that label in the
-    output of `dfl status`.
+    If a delta reference is number (optionally prefixed by 'd') it resolves to
+    the branch with that number in the output of dfl status.
+    , checkout the delta branch
+    that has that label in the output of "dfl status".
 
     If not a number, match against delta-branch names and if there is a unique
     match, checkout that branch.
@@ -896,7 +897,7 @@ def plan(app, strategy, edit, show) -> None:
             if len(tree) > 0:
                 click.echo("Deltas written:")
             app.print_deltas({b: None for b in tree.keys()})
-            click.echo("Run `dfl push` to push deltas to the remote.")
+            click.echo('Run "dfl push" to push deltas to the remote.')
         except (ParsingError, PlanError, CherryPickFailed) as exc:
             click.echo(f"Received plan:\n\n{new_plan}\n")
             exc.handle_in_cli()
@@ -939,7 +940,7 @@ def status(app, show_targets) -> None:
 @undiverged
 @on_local
 def remix(app) -> None:
-    """Alias for `git rebase -i <upstream>`.
+    """Alias for "git rebase -i <upstream>".
 
     Only works when on local branch.
     """
@@ -947,7 +948,7 @@ def remix(app) -> None:
     hot_branches = app.get_hot_branches()
     app.prune_local_branches(hot_branches=hot_branches)
     click.echo(
-        "Hint: if you changed or amended commits, you need to run `dfl write` to "
+        'Hint: if you changed or amended commits, you need to run "dfl write" to '
         "update your delta branches."
     )
 
@@ -958,7 +959,7 @@ def remix(app) -> None:
 @valid_local_commits
 @on_local
 def pull(app) -> None:
-    """Alias for `git pull --rebase <upstream>`.
+    """Alias for "git pull --rebase <upstream>".
 
     Only works when on local branch.
     """
@@ -974,7 +975,7 @@ def pull(app) -> None:
 @pass_app
 @undiverged
 def log(app) -> None:
-    """Alias for `git log <local> ^<upstream>`."""
+    """Alias for "git log <local> ^<upstream>"."""
     if utils.get_current_branch() != app.local:
         click.echo("Warning: not on local branch.")
     subprocess.run(f"git log {app.local} ^{app.upstream_name}", shell=True)
@@ -993,7 +994,7 @@ def checkout(app, reference) -> None:
 
     Otherwise, REFERENCE is treated as a delta reference. If it is a number
     (optionally prefixed by 'd'), checkout the delta branch that has that label
-    in the output of `dfl status`.
+    in the output of "dfl status".
 
     If not a number, match against delta-branch names and if there is a unique
     match, checkout that branch.
@@ -1023,7 +1024,7 @@ def write(app) -> None:
     if len(tree) > 0:
         click.echo("Deltas written")
     app.print_deltas({b: None for b in tree.keys()})
-    click.echo("Run `dfl push` to push deltas to the remote.")
+    click.echo('Run "dfl push" to push deltas to the remote.')
 
 
 @cli_command

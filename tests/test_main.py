@@ -294,7 +294,7 @@ def test_reconstruct_tree__unrecognized_commit(
     )
     if anchor_commit == "last":
         assert (
-            f"WARNING: Branch name of inferred delta {branches[0]} is not consistent with last commit."
+            f"WARNING: Branch name of inferred delta {branches[0]} is inconsistent with last commit."
             in captured.err
         )
 
@@ -314,7 +314,7 @@ def test_reconstruct_tree__missing_commits(
     app.reconstruct_tree()
     captured = capsys.readouterr()
     assert (
-        f"WARNING: Branch name of inferred delta {branches[0]} is not consistent with last commit."
+        f"WARNING: Branch name of inferred delta {branches[0]} is inconsistent with last commit."
         == captured.err.strip()
     )
 
@@ -332,10 +332,7 @@ def test_reconstruct_tree__missing_all(
     utils.run("reset", "HEAD~2", cwd=git_repository)
     with pytest.raises(GitStateError) as exc_info:
         app.reconstruct_tree()
-    assert (
-        f"Cannot reconstruct tree: ephemeral branch {branches[0]} has no commits."
-        == str(exc_info.value)
-    )
+    assert f"Ephemeral branch {branches[0]} has no commits." == str(exc_info.value)
 
 
 def test_reconstruct_tree__missing_one(
@@ -351,9 +348,7 @@ def test_reconstruct_tree__missing_one(
     utils.run("reset", "HEAD~1", cwd=git_repository)
     with pytest.raises(GitStateError) as exc_info:
         app.reconstruct_tree()
-    assert f"Cannot reconstruct tree: delta {branches[-1]} has no commits." == str(
-        exc_info.value
-    )
+    assert f"No local commits on delta {branches[-1]}." == str(exc_info.value)
 
 
 def test_reconstruct_tree__anchor_commit(app, capsys, anchor_commit, dag_commits):

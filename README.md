@@ -1,121 +1,154 @@
 # Dflock
 
-Dflock is a git-complementing tool that automates the tedious parts of diff-stacking on platforms that use branch-based [change-requests](#change-requests) such as Gitlab and Github (but see [snags](#are-there-any-snags) for Github).
+Dflock is a git-complementing tool that automates the tedious parts of diff-stacking on platforms that use branch-based change requests (pull requests in Github and merge requests in Gitlab).
 
-It is designed specifically for a workflow in which all work happens on a single branch and commits are periodically and selectively submitted to change requests.
+It enables a workflow in which all work happens on a single branch and commits are periodically and selectively added to change requests.
 
-## What does dflock offer?
+Dflock's main features are:
 
-Dflock offers the following:
+* Support for a [workflow](#workflow-and-concepts) in which you never create branches
+* Helping you submit work as small incremental change requests
+* Interaction and control via a text editor with [integration plans](#integration-plan)
+* Simple and minimalist with a light footprint: the only state stored by dflock consists of git branches
 
-* Support for a [workflow](#what-is-this-workflow-you-speak-of) in which you never create branches
-* Smoothly creating multiple change requests at once
-* Flexibly stacked change requests
-* Interaction via your favourite text editor
+You can use dflock together with git.
+Dflock aims to complement git, not hide it.
+Dflock slots into conventional merge- or pull-request-based workflows on Gitlab and Github.
+Therefore, there is no need to convince all your collaborators to switch platforms or workflows before you can start using it.
 
-Dflock uses git under the hood and adds a thin layer of abstraction. It aims to complement git, not replace it.
-You can use it together with git and collaboration platforms like Github and Gitlab, although is has only been tested extensively it with Gitlab.
+You can [use dflock to created stacked merge requests in Gitlab](#stacked-merge-requests-on-gitlab).
+At the time of writing, Github pull requests [behave in a way that makes stacking them complicated](#stacked-pull-requests-on-github).
+
+## Who is it for?
+
+Developers who want to stack change requests, are comfortable editing git history, and like the idea of using text editors as a user interface.
 
 ## What does it do?
 
-Dflock's main specialty is translating a text-based plan specifying dependencies between commits into a set of (optionally stacked) change requests.
+Dflock's main specialty is to create git branches according to a text-based plan for change requests.
+The plan defines change requests and assigns commits to them.
+If there are dependencies between commits, the plan can be used to stack the corresponding change requests.
+Sometimes, however, commits can be integrated independently.
+This can be indicated in the plan too.
 
-The plan specifies how to divide these commits over one or more change requests and in what order these change requests can be integrated.
-It looks a bit like the interface of git interactive rebase. Here's an example of such a plan.
+As an illustration, assume that your main branch points to commit `c0` and on top of that you have three commits that exist only on your own machine.
+Dflock will show you the following integration plan.
+Note that the plan looks a bit like the plan for an interactive rebase in git.
 
 ```git
-d0 0001b3a Update README with overview of commands
-d1 1dc86f8 Add functionality to update change requests to App class
-d2@d1 9ee1334 Add --update-change-request flag to push command
+s c1 Update README with overview of commands
+s c2 Add functionality to update change requests to App class
+s c3 Add --update-change-request flag to push command
 ```
 
-It contains three commits and instructs dflock to create three branches and try to cherry pick commits into them: `d0` will contain commit `0001b3a`, `d1`, will contain commits `1dc86f8`, and `d2` will contain commits `1dc86f8` and `9ee1334`.
-This will be successful if the changes in `d1` are independent from the changes in `d0`.
-These branches can be used to create three change requests: change requests `d0` and `d1` have the upstream branch as they target branch, while `d2` has the `d1` as its target branch.
-Note that `d0` and `d1` can be integrated in any order, but `d2` requires `d1` to be integrated first (or to be integrated in `d1`).
+The `s` directive tells dflock to skip the commit on that line, so the plan above doesn't do anything.
 
-Dflock remembers the plan, even after more commits are added or some change requests have been integrated.
-Its footprint is light: the only information dflock needs is the names of the branches it created and the commits they contain.
+To create change requests, we can edit the plan to look, for example, like this:
 
-## How do I install and use it?
+```git
+d1 c1 Update README with overview of commands
+d2 c2 Add functionality to update change requests to App class
+d3@d2 c3 Add --update-change-request flag to push command
+```
 
-Install dflock by cloning the repository or using pip:
+The `d` directive combined with a numeric label tells dflock to create a change request and the `@` symbol is used for stacking change requests.
+This plan assumes that commits `c1` and `c2` are independent, and that commit `c3` depends on the previous commit.
+Based on the plan above, dflock will create three branches that we'll call `d1`, `d2`, and `d3` and cherry-pick commits into them as shown below.
+
+```
+main -->   c0
+          / |
+  d0 --> c1 c2 <-- d1
+            |
+            c3 <-- d2
+```
+
+The cherry-picking will only be successfully the changes in `c2` do not conflict with (i.e., change parts of files that were changed in) `c1`.
+
+The created branches can be used to create three change requests: change requests `d1` and `d2` have the upstream branch as they target branch, while `d3` has the `d2` as its target branch. Note that Github uses the term "base branch" for what I call target branch here.
+
+Note that `d1` and `d2` can be integrated in any order, but `d3` requires `d2` to be integrated first.
+
+Dflock remembers the plan, even after more commits are added or if its change requests have been partially integrated into the main branch.
+This makes it easy to return to it later to, for example, add more commits to change requests or create new change requests.
+
+## How do I install it?
+
+Dflock is on PyPi so you can install it with pip.
 
 ```
 pip install dflock
 ```
 
-Go to the repository of the project in which you want to use dflock.
+## How do I use it?
 
-To configure a custom local branch, upstream branch (learn more about the [workflow](#what-workflow-does-dflock-support) to understand these concepts), and text editor for interaction, type
+First, determine which branches you want to use as your [upstream](#upstream) and [local](#local) (read more about these concepts [here](#workflow-and-concepts)).
 
-```
-dfl init
-```
+By default, dflock assumes `origin/main` as the upstream and `main` as the local.
 
-Now you can start committing to your local branch. To create change requests, use
+To change this and to set some other configuration options such as the text editor to use for plans, use `dfl init` to interactively generate a configuration file.
 
-```
-dfl plan
-```
+The configuration is stored in your repository's root folder in a file called `.dflock`. You can edit it later if you change your mind about some of the settings.
+If you want to re-use configuration across projects, move `.dflock` to `~/.dflock`.
 
-to bring up the [integration plan](#the-integration-plan).
+Having committed some work to your local branch, create one or more change requests using `dfl plan`.
+This brings up the [integration plan](#integration-plan).
 
-If the branches have been created successfully, you can push them with
+If the plan executes successfully, you inspect the created branches with `dfl status`.
 
-```
-dfl push
-```
+To push the branches to the remote, use `dfl push`.
 
-On the collaboration platform you use you can now create change requests manually. To show an overview of branches and target branches created by dflock, use
+You can also selectively push branches using their index in the output `dfl status`. For example, to push only the first branch, use `dfl push 0`.
 
-```
-dfl status --show-targets
-```
+Dflock can create change requests automatically while pushing branches to some platforms. See [this section](#automatic-merge-request-creation) for more information.
 
-For some platforms dflock can create change requests automatically. See [this section](#can-dflock-automatically-create-change-requests) for more information.
+Otherwise, you can use the pushed branches to create change requests manually. To see an overview of branches and target branches created by dflock, use
+`dfl status --show-targets`.
 
-To learn more about how to make effective use of dflock, see the [recommended workflow](what-workflow-was-dflock-built-for).
+These steps illustrate only basic usage. For a complete overview of available commands, use `dfl --help`. For more information about a specific command, use `dflock <command> --help`.
 
-## What workflow was dflock built for?
+## Workflow and concepts
 
-Dflock was built for a workflow in which almost all work is done on a single branch, called the [*local*](#local) branch.
-This branch tracks an [*upstream*](#upstream) branch, into which your work aspires to be integrated via [*change requests*](#change-requests).
+Dflock is built for a workflow in which almost all work is done in a single branch, called the [*local*](#local) branch.
+This branch tracks an [*upstream*](#upstream) branch, into which your work aspires to be integrated via [*change requests*](#change-request).
 Your local branch is usually a few commits ahead of the upstream.
 These commits are your [*local commits*](#local-commits).
-Your local commits usually consist of in-progress work and work awaiting review and approval.
+Your local commits are usually a mixture of work-in-progress and commits awaiting review and approval.
 
 ### Development of changes
 
-Changes are committed incrementally to the local branch. There is no need to create branches for new features. When one feature is finished, you simply continue committing to the same branch.
+You commit changes directly to the local branch. There is no need to create branches for new features. When one feature is finished and, you simply create more commits on the same branch to start working on the next one.
 
 ### Submitting change requests
 
-To create change requests, you periodically use `dfl plan` bring up the [*integration plan*](#integration-plan) and selectively assign sets of commits ([*deltas*](#delta)) to change requests and specify their inter-dependencies.
-Based on the plan, dflock will create one [*ephemeral branch*](#ephemeral-branch) per change request and cherry-pick commits into it.
+To create change requests, you periodically run `dfl plan` to bring up the [*integration plan*](#integration-plan) in which you selectively assign sets of commits ([*deltas*](#delta)) to change requests and specify their inter-dependencies.
+Based on the plan, dflock will create an [*ephemeral branch*](#ephemeral-branch) for each change request and cherry-pick the selected commits into them.
+Dflock remembers the integration plan. In case you need to refine or edit it, you can run `dfl plan` again to bring up the integration plan you previously created.
 
-Importantly, ephemeral branches only exist to serve change requests.
-You generally do not commit to or manipulate ephemeral branches directly because dflock may delete them when they are no longer needed.
+Importantly, ephemeral branches exist only to serve change requests.
+You generally do not commit to or manipulate ephemeral branches directly because dflock cleans up these branches when they are no longer needed.
 This happens for example after the change request has been integrated.
 All changes originate from the local branch, flowing via ephemeral branches into the remote upstream.
 
-When the change requests are ready for submission, use `dfl push` to push them to the remote. Dflock offers some support for automaticaly creating change requests on Gitlab or Github as described [below](#automatic-change-request-creation).
+When the change requests are ready for submission, run `dfl push` to push them to the remote. See the [setup for Gitlab](#stacked-merge-requests-on-gitlab) or [Github](#stacked-pull-requests-on-github) for platform-specific notes on automatically creating change requests with dflock.
 
-### Amending previous changes
+### Amending change requests
 
 When making changes to published change requests, for example to address reviewer comments, you are free to use whatever method you prefer to re-order, amend or drop local commits.
-After amending commits used in change requests, you can use `dfl write` to update the ephemeral branches.
-If you instead want to add updates to a change request as extra commits, you can use `dfl plan` to do so.
+To this end, dflock provides the command `dfl remix`, which invokes `git rebase --interactive <upstream>`.
+
+After amending commits used in change requests, run `dfl write` to update the ephemeral branches.
+If you packaged amendments in separate commits, run `dfl plan` to do add them to the existing change requests.
 
 ### Incorporating upstream changes
 
-Once change requests have been integrated into the upstream branch, you can update the local branch using `dfl pull`.
-This performs a `git pull --rebase <remote> <upstream>` and prunes ephemeral branches.
+Once change requests are integrated into the upstream branch, update the local branch using `dfl pull`.
+This invokes `git pull --rebase <remote> <upstream>` and prunes ephemeral branches if needed.
 The same method can be used to pull in changes integrated into the upstream by others.
 
 ## The integration plan
 
-Integration plans are a central concept in dflock. Typing `dfl plan` brings up a text editor showing the current integration plan. Each line of the plan consists corresponds to a commit and consists of a command, a truncated commit checksum, and the first line of the commit message.
+The Integration plan plays a central role in dflock. Typing `dfl plan` brings up a text editor showing the current integration plan. Each line of the plan corresponds to a commit and consists of a command, a truncated commit checksum, and the first line of the commit message.
 
 The command starts either with `d` to add the commit to a delta or `s` to skip it. To distinguish different deltas, an optional numeric label can be given. E.g., `d0` and `d1` create different deltas. To specify a dependency, the `@` symbol followed by a delta label is used. E.g., `d1@d0` creates a delta that depends on `d0`.
 
@@ -133,7 +166,7 @@ d0 1 ...
 s 2 ...
 ```
 
-#### Multiple commits in one change-request
+#### Multiple commits in one change request
 
 This plan creates a single change request containing commit 1 and 2.
 
@@ -143,7 +176,7 @@ d0 1 ...
 d0 2 ...
 ```
 
-#### Non-contiguous commits in one change-request
+#### Non-contiguous commits in one change request
 
 Commits in a plan don't need to follow each other sequentially.
 
@@ -177,37 +210,7 @@ d2@1 2 ...
 
 ### Syntactical rules
 
-Since plans are edited in a text editor their syntax is designed to require a minimal number of edits, while maintaining unambiguousness.
-
-#### Delta-labels can be ommitted
-
-An omitted label also distinguishes deltas.
-
-```
-d 0 ...
-d0 1 ...
-```
-
-is the same as
-
-```
-d0 0 ...
-d1 1 ...
-```
-
-and
-
-```
-d 0 ...
-d1@ 1 ...
-```
-
-is the same as
-
-```
-d0 0 ...
-d1@d0 1 ...
-```
+Since plans are edited in a text editor, the syntax includes support for shortcuts that minimize the number of edits required for creating unambiguous plans.
 
 #### The `d` prefix can be omitted when referring to deltas after `@`
 
@@ -226,12 +229,13 @@ is the same as
 d1 1 ...
 ```
 
-#### The target-branch needs to be specified only once in change requests consisting of multiple commits.
+#### Delta labels can be omitted
+
+An omitted label serves as a distinguishing label.
 
 ```
-d0 0 ...
-d1@d0 1 ...
-d1@d0 2 ...
+d 0 ...
+d0 1 ...
 ```
 
 is the same as
@@ -239,14 +243,43 @@ is the same as
 ```
 d0 0 ...
 d1 1 ...
+```
+
+and
+
+```
+d 0 ...
+d1@d 1 ...
+```
+
+is the same as
+
+```
+d0 0 ...
+d1@d0 1 ...
+```
+
+#### In change requests with multiple commits, specifying the target-branch once is enough
+
+```
+d0 0 ...
+d1 1 ...
 d1@d0 2 ...
 ```
 
-### Limitations
+is the same as
 
-Currently, dflock imposes some limitations on what plans can be specified. These constraints are not inherent to the workflow and might be lifted in future versions of dflock.
+```
+d0 0 ...
+d1@d0 1 ...
+d1@d0 2 ...
+```
 
-#### A change-request cannot depend on multiple change requests.
+## Constraints on plans
+
+Dflock imposes some constraints on what plans can be specified. These constraints are not inherent to the workflow and might be lifted in future versions of dflock.
+
+#### A change request cannot depend on multiple change requests
 
 The only way to make d2 depend on both d0 and d1 is to fully stack them:
 
@@ -256,21 +289,21 @@ d1@d0 1 ...
 d2@d1 2 ...
 ```
 
-#### A change request occurring after another change request cannot have a dependency that occurring before the dependency of the last change-request.
+#### Change request dependencies can not cross
 
-This is not possible:
+The following is not allowed:
 
 ```
 d0 0 ...
 d1@d0 1 ...
-d1 2 ...
+d2 2 ...
 ```
 
-Note that a change-request with no specified dependency has an implicit dependency on the upstream.
+because `d1` depends on `d0`, and all change requests after `d1` must also depend on `d0` or change requests that came after it.
+Note that a change request with no specified dependency has an implicit dependency on the upstream.
 
-It these situations it is always possible to use `dfl remix` to re-order the commits such that a valid plan can be constructed.
-
-For example, in the plan above, if commit 2 is truly independent from the others as implied by the plan, it can be swapped with commit 1 to construct the following valid plan:
+In this particular situation we can use `dfl remix` to re-order the commits such that a valid plan can be constructed.
+If we swap commit 2 with commit 1, we can construct the following valid plan:
 
 ```
 d0 0 ...
@@ -278,186 +311,64 @@ d1 2 ...
 d1@d0 1 ...
 ```
 
-## How should I set up Gitlab or Github?
+## Stacked merge requests on Gitlab
 
-I found the following settings to work well with dflock's workflow:
+Gitlab to some extend faciliates stacked merge requests. For example, if a merge request at the bottom of the stack is merged, the target branch of the next merge request is updated automatically.
 
-For both Gitlab and Github, configure:
+The steps below outline, using a simple example, how to stack merge requests.
 
-1. auto-delete change request branch ("source branch" in Gitlab, "head branch" in Github) after merge
-2. only allow fast-forward merges into upstream
+Suppose that you want to create three stacked merge requests out of three subsequent commits. To do this, first use `dfl plan`, create an [integration plan](#the-integration-plan) as shown below to create three stacked deltas.
 
-Setting 1) ensures that when you have `B -> A -> main` and you merge `A`, the target/base branch of `B` is updated to the target/base branch of `A`, namely `main`.
+```
+d1 c1 ...
+d2@1 c2 ...
+d3@2 c3 ...
+```
 
-Setting 2) ensures that running `git pull --rebase origin main` will auto-detect already applied commits.
+Then, to push these deltas to Gitlab and create stacked merge requests automatically, run `dfl push -m` (see [automatic merge request creation](#automatic-merge-request-creation)).
+The target branch of the merge request corresponding to `d1` will be the upstream, for `d2` it's `d1` and for `d3` it's `d2`.
 
-## Does dflock need configuring?
+The diff of each merge request will show only the changes in its corresponding commit. That is, the diff of the merge request corresponding to `d2` will show only the changes in `c2` and that of `d3` only the changes in `c3`.
 
-Dflock comes with a default configuration. In this configuration, both the local and upstream branch are assumed to be the main branch.
+The merge requests should be merged in order. Once the merge request of `d1` has been merged (make sure to delete the source branch), Gitlab will automatically update the target branch of the next merge request to the upstream.
 
-You can provide custom configuration in a file called `.dflock` placed either in your home directory (for cross-project configuration) or the root folder of a git repository (for per-project configuration). In the latter case, it's best to add `.dflock` to `.gitignore` since it contains personal configuration.
+If you have any merge conflicts, be sure to solve the by rebasing your local branch on the upstream (e.g., using `dfl pull`).
 
-You can generate a project-local configuration interactively by running `dfl init`.
+Gitlab supports [merge request dependencies](https://docs.gitlab.com/user/project/merge_requests/dependencies/#nested-dependencies) which prevent a merge before its dependencies have been merged.
+This is ideal for stacked merge requests, but dflock does not yet support automatically setting these dependencies.
 
-## Can dflock automatically create change requests?
+## Stacked pull requests on Github
 
-Yes, dflock has rudimentary for automatic change-requests creation. It also provides a mechanism for extending this with custom commands.
+You can use dflock with Github, but the experience of stacking pull requests is, at the time of writing, less smooth than with Gitlab: Github does not support pull request dependencies and merging the first pull request in a stack causes the next pull request in the stack to complain about merge conflicts.
 
-### Gitlab merge requests
+## Automatic merge request creation
 
-To create Gitlab you have two options: By default, `dfl push` supports the `--merge-request` flag which will use [git push options](https://docs.gitlab.com/topics/git/commit/#push-options) to trigger merge-request creation when pushing to gitlab.
+To automatically create merge requests with dflock in Gitlab can use `dfl push` with the `--merge-request` flag.
+This will trigger the creation of a merge request on gitlab using [git push options](https://docs.gitlab.com/topics/git/commit/#push-options).
 
-Alternatively, you can add a custom integration, for example using the `glab` CLI. To do so, add the following to your [`.dflock` configuration](#configuration) file.
+Alternatively, you can add a custom integration, for example using the `glab` CLI. To do so, add the following to your `.dflock` file.
 
 ```
 [integrations.gitlab]
 change-request-template=glab mr create --source-branch {source} --target-branch {target}
 ```
 
-To use this template in `dfl push`, invoke it with `--change-request github`.
+To use this integration run `dfl push` with the option `--change-request gitlab`.
 
-### Github pull requests
+## Automatic pull request creation
 
-For github, you can create a custom change-request integration that uses the `gh` CLI tool. To do so, add the following to your `.dflock` configuration file.
+To automatically create pull requests on Github with dflock, you have to add an integration that uses the `gh` CLI tool. To do so, add the following to your `.dflock` configuration file.
 
 ```
 [integrations.github]
 change-request-template=gh pr create --head {source} --base {target}
 ```
 
-To use this template in `dfl push`, invoke it with `--change-request github`.
-
-## What commands does dflock support?
-
-### Plan
-
-`dfl plan`
-
-Detect and edit the current integration plan. This is operation automates the most complex parts of the workflow. It detects the integration plan from existing local branches and creates or updates ephemeral branches for change requests. Most other commands are essentially convenient shortcuts for common git commands.
-
-### Write
-
-`dfl write`
-
-Detect the current integration plan and create or update the ephemeral branches accordingly. Normally `dfl plan` performs this operation, but `dfl write` is useful when the plan has not changed but you've amended or re-ordered commits in your local branch.
-
-### Push
-
-`dfl push`
-
-Push ephemeral branches to the remote and optionally create change requests.
-
-### Pull
-
-`dfl pull`
-
-Update your local branch. Shortcut for `git pull --rebase <remote> <upstream>`, but performs additional branch-pruning afterwards.
-
-### Remix
-
-`dfl remix`
-
-Edit the local commit history with git interactive rebase. Shorthand for `git rebase --interactive <upstream>`, but performs additional branch-pruning afterwards.
-
-### Log
-
-`dfl log`
-
-Show a git log containing only local commits. Shorthand for `git log <local> ^<upstream>`.
-
-### Status
-
-`dfl status`
-
-Show current ephemeral branches and whether they are up to date with the remote.
-
-### Checkout
-
-`dfl checkout`
-
-Perform a `git checkout` on the local branch or an ephemeral branch. As a shortcut, the ephemeral-branch indices shown by `dfl status` can be used here, or a substring of the branch name if it resolves to a unique branch.
-
-### Reset
-
-`dfl reset`
-
-Reset the integration plan by deleting all ephemeral branches associated with the current local commits.
-
-## Are there any snags?
-
-### Integrating stacked change requests causes conflicts in Github
-
-When creating pull requests based on the plan below, two branches are created: one containing commit 0, and one containing commits 0 and 1.
-
-```
-d0 0 ...
-d1@d0 1 ...
-```
-
-After merging the first pull-request (containing commit 0), Github unfortunately does not recognize that commit 0, now added to the upstream, does not conflict with commit 0 in the second pull request and marks it as a conflict.
-
-This is seriously hampers the usefulness of this workflow in Gitlab.
-
-Gitlab does not have this issue.
-
-### Github does not allow pull request dependencies
-
-A Github pull request offers no way to block merging it before another pull request has been merged. Gitlab does support this, although dflock's default automatic merge request creation mechanism does not currently populate this field.
-
-### Not pushing all deltas leads to incorrect diffs and conflicts
-
-Consider the following plan:
-
-```
-d0 0 ...
-d1@d0 1 ...
-```
-
-In our change requests we expect the diff of the first change request to show the changes in commit 0 and the diff of the second change request to show the changes in commit 1.
-
-However if we update and push only the second change request, the commit checksum of commit 0 in `d1`'s ephemeral branch will change. As a result the diff shown in the change request might include the changes from commit 0 because the commit in the target branch is no longer recognized as commit 0.
-
-This happens because any update to the integration plan causes dflock to re-write the ephemeral branches. Since that process relies on cherry-picking, the commit checksums change upon each write.
-
-Visually, upon pushing d0 and d1, the situation on the remote is as follows:
-
-```
-0 --> 1
-|     |
-d0    d1
-```
-
-After update commit one (creating commit 1') and cherry-picking commits 0 and 1' the following situation is created on the remote:
-
-```
-0
-|
-d0
-
-0' --> 1'
-       |
-       d1
-```
-
-### Frequent updating of change requests
-
-Trying to avoid the issue of [incorrect diffs when not pushing all deltas](#not-pushing-all-deltas-leads-to-incorrect-diffs) causes a change request to be updated each time a downstream change request is updated - even though nothing changed.
-
-This might be undesirable for various reasons including spurious notifications sent to change request reviewers or unnecessary triggering of slow or expensive CI/CD pipelines.
-
-### Limitations of automatic change request creation
-
-#### Gitlab
-
-As already mentioned, dflock only configures the target branches and does add dependencies on other merge requests to the created merge request.
-
-#### Gitlab and Github
-
-If dependencies are changed by an updated integration plan and merge requests have already been created, the target branches of the merge requests are not updated automatically.
+To use this integration run `dfl push` with the option `--change-request github`.
 
 ## Why is it called dflock?
 
-The name dflock derives from *delta flock* because the tool allows you to herd a flock of deltas.
+The name dflock derives from *delta flock*, because the tool allows you to herd a flock of deltas.
 
 ## Glossary
 
@@ -475,7 +386,7 @@ Commits you are working on that are only on your local branch and not in the ups
 
 ### Integration plan
 
-A text-based representation of a tree-like structure that instructs dflock which deltas to construct and how they depend on each other. See [this section](the-interation-plan) for more discussion of integration plans.
+A text-based representation of a tree-like structure that instructs dflock which deltas to construct and how they depend on each other. See [this section](#the-integration-plan) for more information about integration plans.
 
 ### Delta
 
@@ -483,7 +394,7 @@ A set of changes represented by one or more commits.
 
 ### Change request
 
-A request to integrate a set of commits (a delta) into the upstream. Gitlab and github call this merge requests and pull requests respectively.
+A request to integrate a set of commits (a delta) into the upstream. Gitlab and Github call this merge requests and pull requests respectively.
 
 ### Ephemeral branch
 

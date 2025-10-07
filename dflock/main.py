@@ -578,6 +578,7 @@ def resolve_delta(name: str, branches: list[str]) -> str:
     raise ValueError(f"Could not match {name} to a unique branch")
 
 
+@clean_work_tree
 def write_plan(tree: dict[str, Delta]) -> None:
     """Create feature branches based on the plan in tree.
 
@@ -849,7 +850,6 @@ def push(
 )
 @inside_work_tree
 @pass_app
-@clean_work_tree
 @valid_local_commits
 @no_hot_branch
 @undiverged
@@ -1011,7 +1011,6 @@ def checkout(app, reference) -> None:
 
 @cli_command
 @inside_work_tree
-@clean_work_tree
 @pass_app
 @no_hot_branch
 @undiverged

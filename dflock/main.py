@@ -274,7 +274,7 @@ class App:
     change_request_templates: dict[str, str]
 
     @classmethod
-    def from_config(cls, config: typing.Mapping) -> typing.Self:
+    def from_config(cls, config: typing.Mapping) -> "App":
         dflock = config["dflock"]
         integrations = [
             (k, k.split(".")[1])

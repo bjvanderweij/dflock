@@ -227,15 +227,21 @@ class Delta(typing.NamedTuple):
             )
 
     def get_force_push_command(
-        self, remote: str, merge_request: bool = False
+        self, remote: str, merge_request: bool = False, without_lease: bool = False
     ) -> list[str]:
+        if without_lease:
+            force_option = "--force"
+        else:
+            force_option = "--force-with-lease"
         command = [
             "push",
-            "--force-with-lease",
             "--set-upstream",
+            force_option,
             remote,
             f"{self.full_branch_name}:{self.full_branch_name}",
         ]
+        if not without_lease:
+            command.append("--force-with-lease")
         if merge_request:
             command += ["--push-option", "merge_request.create"]
             if self.target is not None:
@@ -753,6 +759,13 @@ def cli():
     help="Also detect the current plan and update the ephemeral branches.",
 )
 @click.option(
+    "-f",
+    "--force-push-without-lease",
+    is_flag=True,
+    type=bool,
+    help="Force push without the --with-lease option.",
+)
+@click.option(
     "-i",
     "--interactive",
     is_flag=True,
@@ -779,7 +792,13 @@ def cli():
 @pass_app
 @valid_local_commits
 def push(
-    app, delta_references, write, interactive, merge_request, change_request
+    app,
+    delta_references,
+    write,
+    interactive,
+    merge_request,
+    change_request,
+    force_push_without_lease,
 ) -> None:
     """Push deltas to the remote.
 
@@ -816,7 +835,9 @@ def push(
             )
         if not interactive or do_it:
             push_command = delta.get_force_push_command(
-                app.remote, merge_request=merge_request
+                app.remote,
+                merge_request=merge_request,
+                without_lease=force_push_without_lease,
             )
             click.echo(f"Pushing {delta.branch_name}.")
             output = utils.run(*push_command)

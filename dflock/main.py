@@ -80,8 +80,9 @@ def no_hot_branch(f) -> typing.Callable:
     @functools.wraps(f)
     def wrapper(app, *args, **kwargs):
         if utils.get_current_branch() in app.get_hot_branches():
-            raise click.ClickException(
-                "please switch to a branch not managed by dflock before continuing"
+            raise DflockException(
+                "You're on an ephemeral branch. Switch to another branch before continuing.",
+                hints=['you can use "dfl checkout" to check out the local branch.'],
             )
         return f(app, *args, **kwargs)
 
@@ -98,6 +99,17 @@ def valid_local_commits(f):
             raise GitStateError(
                 "Duplicate commit messages found in local commits.", hints=hints
             )
+        return f(app, *args, **kwargs)
+
+    return wrapper
+
+
+def remote_required(f):
+    @functools.wraps(f)
+    def wrapper(app, *args, **kwargs):
+        if app.remote == "":
+            hint = 'use "dflock init" to generate a configuration file interactively'
+            raise DflockException("No remote configured.", hints=[hint])
         return f(app, *args, **kwargs)
 
     return wrapper
@@ -724,7 +736,7 @@ def cli_command(f):
     def wrapper(*args, **kwargs):
         try:
             return f(*args, **kwargs)
-        except (GitStateError, CherryPickFailed) as exc:
+        except DflockException as exc:
             exc.handle_in_cli()
 
     return wrapper
@@ -734,8 +746,10 @@ def cli():
     try:
         cli_group()
     except subprocess.CalledProcessError as exc:
-        click.echo(f"Subprocess failed:\n{exc}\n", err=True)
-        click.echo(f"Captured output:\n{exc.output}\n{exc.stderr}\n", err=True)
+        click.echo(
+            f"Subprocess failed. Captured output:\n{exc.output.decode()}\n{exc.stderr.decode()}\n",
+            err=True,
+        )
         raise
 
 
@@ -778,6 +792,7 @@ def cli():
 @inside_work_tree
 @pass_app
 @valid_local_commits
+@remote_required
 def push(
     app, delta_references, write, interactive, merge_request, change_request
 ) -> None:
@@ -794,8 +809,6 @@ def push(
     If not a number, match against delta-branch names and if there is a unique
     match, checkout that branch.
     """
-    if app.remote == "":
-        raise click.ClickException("Remote must be set.")
     tree = app.reconstruct_tree()
     if write:
         with utils.return_to_head():
@@ -958,13 +971,12 @@ def remix(app) -> None:
 @pass_app
 @valid_local_commits
 @on_local
+@remote_required
 def pull(app) -> None:
     """Alias for "git pull --rebase <upstream>".
 
     Only works when on local branch.
     """
-    if app.remote == "":
-        raise click.ClickException("Remote must be set.")
     hot_branches = app.get_hot_branches()
     subprocess.run(f"git pull --rebase {app.remote} {app.upstream}", shell=True)
     app.prune_local_branches(hot_branches=hot_branches)

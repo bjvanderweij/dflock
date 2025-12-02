@@ -945,8 +945,8 @@ def plan(app, strategy, edit, show) -> None:
             app.prune_local_branches(tree=tree)
             if len(tree) > 0:
                 click.echo("Deltas written:")
-            app.print_deltas({b: None for b in tree.keys()})
-            click.echo(f'Run "dfl push" to push them to remote {app.remote}.')
+                app.print_deltas({b: None for b in tree.keys()})
+                click.echo(f'Run "dfl push" to push them to remote {app.remote}.')
         except (ParsingError, PlanError, CherryPickFailed) as exc:
             click.echo(f"Received plan:\n\n{new_plan}\n")
             exc.handle_in_cli()
@@ -981,8 +981,7 @@ def status(app, show_targets) -> None:
         click.echo("Your local and upstream branches have diverged")
     if len(tree) > 0:
         click.echo("\nDeltas:")
-    app.print_deltas(tree, highlight=current_branch)
-    if len(tree) > 0:
+        app.print_deltas(tree, highlight=current_branch)
         click.echo(
             '\nRun "dfl checkout <delta number>" to check out an ephemeral branch.'
         )
@@ -1076,8 +1075,10 @@ def write(app) -> None:
         write_plan(tree)
     if len(tree) > 0:
         click.echo("Deltas written")
-    app.print_deltas({b: None for b in tree.keys()})
-    click.echo(f'Run "dfl push" to push them to remote {app.remote}.')
+        app.print_deltas({b: None for b in tree.keys()})
+        click.echo(f'Run "dfl push" to push them to remote {app.remote}.')
+    else:
+        click.echo('No deltas found. Run "dfl plan" to create them.')
 
 
 @cli_command

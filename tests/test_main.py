@@ -587,7 +587,23 @@ def test_status__on_local(runner, commit, create_branch, git_repository):
     create_branch(LOCAL, checkout=True)
     result = runner.invoke(cli_group, ["status"])
     assert result.exit_code == 0
-    assert "On local branch" in result.output
+    assert "You are on the local branch." in result.output
+
+
+def test_status__on_ephemeral(
+    runner, commit, app, checkout, create_branch, git_repository
+):
+    commit(dict(a="a"), "a")
+    create_branch(UPSTREAM)
+    sha = commit(dict(b="b"), "b")
+    c0 = Commit(sha, "b")
+    branch_name = app.get_commit_branch_name(c0)
+    create_branch(branch_name)
+    create_branch(LOCAL)
+    checkout(branch_name)
+    result = runner.invoke(cli_group, ["status"])
+    assert result.exit_code == 0
+    assert "You are on an ephemeral branch." in result.output
 
 
 def test_status__not_on_local(runner, commit, create_branch, git_repository):
@@ -597,7 +613,7 @@ def test_status__not_on_local(runner, commit, create_branch, git_repository):
     create_branch(LOCAL)
     result = runner.invoke(cli_group, ["status"])
     assert result.exit_code == 0
-    assert "NOT on local branch" in result.output
+    assert "You are not on a branch known to dflock." in result.output
 
 
 def test_status__show_branches(app, runner, commit, create_branch, git_repository):

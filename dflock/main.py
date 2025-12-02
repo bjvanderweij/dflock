@@ -456,16 +456,22 @@ class App:
             self.get_commit_branch_name(c) for c in commits
         )
 
-    def print_deltas(self, deltas: dict[str, None | str]) -> None:
+    def print_deltas(
+        self, deltas: dict[str, None | str], highlight: None | str = None
+    ) -> None:
         for i, (branch, target) in enumerate(deltas.items()):
+            status = ""
             try:
                 up_to_date = branch_up_to_date(branch)
-                click.echo(
-                    f"{'d' + str(i):>4}: "
-                    f"{branch}{'' if up_to_date else ' (diverged)'}"
-                )
+                if not up_to_date:
+                    status = " (diverged)"
             except NoRemoteTrackingBranch:
-                click.echo(f"{'d' + str(i):>4}: {branch} (not pushed)")
+                status = " (not pushed)"
+            line = f"{'d' + str(i):>4}: {branch}{status}"
+            if highlight == branch:
+                click.echo("\033[92m" + line + "\033[0m")
+            else:
+                click.echo(line)
             if target is not None:
                 click.echo(f"{' ' * 6}@ {target}")
 
@@ -951,20 +957,22 @@ def plan(app, strategy, edit, show) -> None:
 def status(app, show_targets) -> None:
     """Show status of delta branches."""
     diverged = utils.have_diverged(app.upstream_name, app.local)
-    on_local = utils.get_current_branch() == app.local
-    if on_local:
-        click.echo("On local branch.")
-    else:
-        click.echo("NOT on local branch.")
-    if diverged:
-        click.echo("Local and upstream have diverged")
     if show_targets:
         tree = app.reconstruct_tree()
     else:
         tree = {b: None for b in app.get_delta_branches()}
+    current_branch = utils.get_current_branch()
+    if current_branch == app.local:
+        click.echo("You are on the local branch.")
+    elif current_branch in tree:
+        click.echo("You are on an ephemeral branch.")
+    else:
+        click.echo("You are not on a branch known to dflock.")
+    if diverged:
+        click.echo("Your local and upstream branches have diverged")
     if len(tree) > 0:
         click.echo("\nDeltas:")
-    app.print_deltas(tree)
+    app.print_deltas(tree, highlight=current_branch)
 
 
 @cli_command

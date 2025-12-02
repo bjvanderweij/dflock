@@ -57,7 +57,7 @@ def on_local(f):
     @local_and_upstream_exist
     def wrapper(app, *args, **kwargs):
         if utils.get_current_branch() != app.local:
-            hints = ['use "dfl checkout local" to return to local.']
+            hints = ['use "dfl checkout" to return to local.']
             raise GitStateError(
                 f"you must be on the local branch: {app.local}.", hints=hints
             )
@@ -232,7 +232,11 @@ class Delta(typing.NamedTuple):
         except subprocess.CalledProcessError:
             hint = (
                 f"To reproduce the failed cherry-pick, run the following "
-                f"commands:\n\n{self.create_instructions}"
+                f"commands:\n\n{self.create_instructions}\n\n"
+                "After running these commands you can return to your local branch "
+                "by running:\n\n"
+                "git cherry-pick --abort\n"
+                "dfl checkout"
             )
             raise CherryPickFailed(
                 f"Cherry-pick failed at branch {self.branch_name}.", hints=[hint]
@@ -937,7 +941,7 @@ def plan(app, strategy, edit, show) -> None:
             if len(tree) > 0:
                 click.echo("Deltas written:")
             app.print_deltas({b: None for b in tree.keys()})
-            click.echo('Run "dfl push" to push deltas to the remote.')
+            click.echo(f'Run "dfl push" to push them to remote {app.remote}.')
         except (ParsingError, PlanError, CherryPickFailed) as exc:
             click.echo(f"Received plan:\n\n{new_plan}\n")
             exc.handle_in_cli()
@@ -973,6 +977,10 @@ def status(app, show_targets) -> None:
     if len(tree) > 0:
         click.echo("\nDeltas:")
     app.print_deltas(tree, highlight=current_branch)
+    if len(tree) > 0:
+        click.echo(
+            '\nRun "dfl checkout <delta number>" to check out an ephemeral branch.'
+        )
 
 
 @cli_command
@@ -1064,7 +1072,7 @@ def write(app) -> None:
     if len(tree) > 0:
         click.echo("Deltas written")
     app.print_deltas({b: None for b in tree.keys()})
-    click.echo('Run "dfl push" to push deltas to the remote.')
+    click.echo(f'Run "dfl push" to push them to remote {app.remote}.')
 
 
 @cli_command

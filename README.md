@@ -63,7 +63,7 @@ The commits here are indicated by `c1`, `c2`, and `c3`, but normally the shorten
 The `s` directive tells dflock to skip the commit on that line, so the plan above doesn't do anything.
 You can find more information about the integration plan syntax [here](#the-integration-plan).
 
-[!NOTE]
+> [!NOTE]
 > The integration plan workflow and the plan's syntax are inspired by the workflow and syntax of the *interactive rebase* operation in Git.
 
 To create change requests, we can edit the plan to look, for example, like this:
@@ -144,7 +144,7 @@ Therefore you generally should not commit to ephemeral branches directly.
 
 When your deltas are ready to become change requests, run `dfl push` to push them to the remote. See the [setup for GitLab](#stacked-merge-requests-on-gitlab) or [GitHub](#stacked-pull-requests-on-github) for platform-specific notes on automatically creating change requests with dflock.
 
-[!NOTE]
+> [!NOTE]
 > Note the local branch itself is never pushed to the remote in the above process.
 > This is exactly what you want if your local branch the local copy of your upstream.
 > However, you may just as well give a different name to your local branch.
@@ -368,7 +368,7 @@ This works as long you don't manually change these or create local commits with 
 If multiple commits are added to a delta, dflock by default uses the first commit to derive the branch name.
 You can configure dflock to use the last commit instead by setting the `anchor-commit` configuration option to "last".
 
-[!NOTE]
+> [!NOTE]
 > Because plans are reconstructed rather than saved, the reconstructed plans might show different numeric labels for your deltas.
 
 ## Constraints on plans
@@ -436,7 +436,7 @@ Because these merge requests are stacked, you should merge `d1` first.
 After doing so, GitLab will update the merge request of `d2` to target the upstream instead of `d1`.
 You can then merge `d2` and so on.
 
-[!NOTE]
+> [!NOTE]
 > Make sure you select the checkbox for deleting the source branch in each merge request.
 > This ensures that the target branch of the subsequently stacked merge request is updated correctly.
 

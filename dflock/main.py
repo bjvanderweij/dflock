@@ -203,6 +203,7 @@ class Delta(typing.NamedTuple):
     commits: tuple[Commit, ...]
     target: typing.Optional["Delta"]
     branch_name: str
+    target_branch: str
     target_branch_name: str
 
     @property
@@ -491,7 +492,10 @@ class App:
         target_branch_name = (
             self.upstream_name if target is None else target.branch_name
         )
-        return Delta(tuple(commits), target, branch_name, target_branch_name)
+        target_branch = self.upstream if target is None else target.branch_name
+        return Delta(
+            tuple(commits), target, branch_name, target_branch, target_branch_name
+        )
 
     def _get_branch_commits(self, branch: None | str = None) -> list[Commit]:
         """Return all commits between upstream and branch.
@@ -868,8 +872,9 @@ def push(
             if change_request is not None:
                 click.echo(f"Creating change request for {change_request}.")
                 command = app.create_change_request_command(
-                    change_request, delta.branch_name, delta.target_branch_name
+                    change_request, delta.branch_name, delta.target_branch
                 )
+                click.echo(f'Creating change request with "{command}"')
                 subprocess.run(command, shell=True)
 
 

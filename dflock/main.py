@@ -30,7 +30,7 @@ INSTRUCTIONS = """
 #                                     delta with target-label
 # s <commit> = do not use commit
 #
-# If you delete a line, the commit will not be used (equivalent to "s")
+# If you delete a line, the commit will not be used (equivalent to "#")
 # If you remove everything, the plan creation is aborted.
 #
 """
@@ -413,7 +413,7 @@ class App:
         delta_indices = {d: i for i, d in enumerate(sorted_deltas)}
         lines = []
         for commit in local_commits:
-            command = "s"
+            command = "#"
             for delta, index in delta_indices.items():
                 if commit in delta.commits:
                     command = f"d{index}"
@@ -423,7 +423,7 @@ class App:
                     break
             else:
                 if include_skipped:
-                    lines.append(f"s {commit.short_str}")
+                    lines.append(f"# {commit.short_str}")
         return "\n".join(lines)
 
     def prune_local_branches(
@@ -580,9 +580,8 @@ def _tokenize_plan(plan: str) -> typing.Iterable[_BranchCommand]:
             if not m:
                 raise ParsingError(f"unrecognized command: {command}")
             label, _, target = m.groups()
-
             yield _BranchCommand(label, target, sha)
-        elif command != "s":
+        else:
             raise ParsingError(f"unrecognized command: {command}")
 
 

@@ -574,19 +574,17 @@ class App:
 def _tokenize_plan(plan: str) -> typing.Iterable[_BranchCommand]:
     for line in iterate_plan(plan):
         try:
-            command, sha, *_ = line.split()
+            delta_spec, sha, *_ = line.split()
         except ValueError:
             raise ParsingError(
                 "each line should contain at least a command and a commit SHA"
             )
-        if command.startswith("d"):
-            m = re.match(r"d([0-9]*)(@d?([0-9]*))?$", command)
-            if not m:
-                raise ParsingError(f"unrecognized command: {command}")
+        m = re.match(r"([0-9a-z]+)(@([0-9a-z]+))?$", delta_spec)
+        if m is not None:
             label, _, target = m.groups()
-            yield _BranchCommand(label, target, sha)
         else:
-            raise ParsingError(f"unrecognized command: {command}")
+            raise ParsingError(f"unrecognized delta specification: {delta_spec}")
+        yield _BranchCommand(label, target, sha)
 
 
 def is_inside_work_tree() -> bool:

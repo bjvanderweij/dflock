@@ -174,9 +174,9 @@ def anchor_commit(app, request):
 
 def test_parse_plan__syntax_errors(app, local_commits):
     with pytest.raises(ParsingError):
-        app.parse_plan("# 0 a\na 1 b\n# 2 v") == {}
+        app.parse_plan("# 0 a\n@ 1 b\n# 2 v") == {}
     with pytest.raises(ParsingError):
-        app.parse_plan("d@s 0 a") == {}
+        app.parse_plan("d@% 0 a") == {}
     with pytest.raises(ParsingError):
         app.parse_plan("# 0 a\nb\n# 2 v") == {}
 
@@ -184,22 +184,22 @@ def test_parse_plan__syntax_errors(app, local_commits):
 def test_parse_plan__illegal_plans(app, local_commits):
     with pytest.raises(PlanError, match="cannot match"):
         # Unrecognized commit
-        app.parse_plan("# 0 a\nd1 a\n# 2 v") == {}
+        app.parse_plan("# 0 a\nx a\n# 2 v") == {}
     with pytest.raises(PlanError, match="cannot match"):
         # Out of order commits
-        app.parse_plan("d 1 a\nd 0 foo") == {}
+        app.parse_plan("d 1 a\n0 0 foo") == {}
     with pytest.raises(PlanError, match="invalid target"):
         # Non contiguous commits in branch
-        app.parse_plan("d 0 a\nd1@ 1 foo\nd  2 v") == {}
+        app.parse_plan("0 0 a\n1@0 1 foo\n0  2 v") == {}
     with pytest.raises(PlanError, match="invalid target"):
         # Incorrect target
-        app.parse_plan("d@1 0 a\nd1 1 foo") == {}
+        app.parse_plan("0@1 0 a\n1 1 foo") == {}
     with pytest.raises(PlanError, match="multiple targets"):
         # Conflicting targets
-        app.parse_plan("d 0 a\nd1 1\nd2@ 2 v\nd2@1 3") == {}
+        app.parse_plan("x 0 a\ny 1\nz@x 2 v\nz@y 3") == {}
     with pytest.raises(PlanError, match="invalid target"):
         # "Crossing" branches
-        app.parse_plan("d 0 a\nd1@ 1 foo\nd2 2 v") == {}
+        app.parse_plan("p 0 a\nq@p 1 foo\nr 2 v") == {}
 
 
 def test_parse_plan__legal_plans(app, local_commits, anchor_commit):
@@ -220,10 +220,10 @@ def test_parse_plan__legal_plans(app, local_commits, anchor_commit):
     d0 = app._create_delta([a], None)
     d1 = app._create_delta([b, c], d0)
     tree = {d.branch_name: d for d in [d0, d1]}
-    variant_1 = app.parse_plan("d 0 a\nd1@ 1 b\nd1 2 v")
-    variant_2 = app.parse_plan("d 0 a\nd1 1 b\nd1@ 2 v")
-    variant_3 = app.parse_plan("d 0 a\nd1@ 1 b\nd1@ 2 v")
-    variant_4 = app.parse_plan("d 0 a\nd1@ 1 b\nd1@ 2 v")
+    variant_1 = app.parse_plan("d 0 a\nd1@d 1 b\nd1 2 v")
+    variant_2 = app.parse_plan("d 0 a\nd1 1 b\nd1@d 2 v")
+    variant_3 = app.parse_plan("d 0 a\nd1@d 1 b\nd1@d 2 v")
+    variant_4 = app.parse_plan("d 0 a\nd1@d 1 b\nd1@d 2 v")
     assert tree == variant_1 == variant_2 == variant_3 == variant_4
     d0 = app._create_delta([a, c], None)
     tree = {d0.branch_name: d0}
@@ -232,8 +232,8 @@ def test_parse_plan__legal_plans(app, local_commits, anchor_commit):
     d1 = app._create_delta([b], d0)
     d2 = app._create_delta([c], d1)
     tree = {d.branch_name: d for d in [d0, d1, d2]}
-    variant_1 = app.parse_plan("d0 0 a\nd1@0 1 foo\nd2@1 2 v")
-    variant_2 = app.parse_plan("d 0 a\nd1@ 1 foo\nd2@1 2 v")
+    variant_1 = app.parse_plan("d0 0 a\nd1@d0 1 foo\nd2@d1 2 v")
+    variant_2 = app.parse_plan("d 0 a\nd1@d 1 foo\nd2@d1 2 v")
     assert tree == variant_1
     assert tree == variant_2
 
@@ -339,7 +339,7 @@ def test_reconstruct_tree__missing_one(
     app, anchor_commit, checkout, git_repository, capsys, dag_commits
 ):
     c1, c2, c3, c4 = dag_commits
-    plan = f"d0 {c1.short_str}\n" f"d1@0 {c2.short_str}\n"
+    plan = f"delta0 {c1.short_str}\n" f"delta1@delta0 {c2.short_str}\n"
     tree = app.parse_plan(plan)
     write_plan(tree)
     branches = list(tree.keys())
@@ -357,7 +357,7 @@ def test_reconstruct_tree__anchor_commit(app, capsys, anchor_commit, dag_commits
         f"d0 {c1.short_str}\n"
         f"d0 {c2.short_str}\n"
         f"d1 {c3.short_str}\n"
-        f"d2@0 {c4.short_str}"
+        f"d2@d0 {c4.short_str}"
     )
     tree = app.parse_plan(plan)
     write_plan(tree)
@@ -384,10 +384,10 @@ def test_reconstruct_tree__anchor_commit(app, capsys, anchor_commit, dag_commits
 def test_reconstruct_tree(app, capsys, dag_commits, anchor_commit):
     c1, c2, c3, c4 = dag_commits
     plan = (
-        f"d0 {c1.short_str}\n"
-        f"d0 {c2.short_str}\n"
-        f"d1 {c3.short_str}\n"
-        f"d2@0 {c4.short_str}"
+        f"0 {c1.short_str}\n"
+        f"0 {c2.short_str}\n"
+        f"1 {c3.short_str}\n"
+        f"2@0 {c4.short_str}"
     )
     tree = app.parse_plan(plan)
     write_plan(tree)
@@ -415,10 +415,10 @@ def test_reconstruct_tree_stacked(
     reconstructed_tree = app.reconstruct_tree()
     reconstructed_plan = app.render_plan(reconstructed_tree)
     plan = (
-        f"d0 {c1.short_str}\n"
-        f"d1@0 {c2.short_str}\n"
-        f"d2@1 {c3.short_str}\n"
-        f"d3@2 {c4.short_str}"
+        f"0 {c1.short_str}\n"
+        f"1@0 {c2.short_str}\n"
+        f"2@1 {c3.short_str}\n"
+        f"3@2 {c4.short_str}"
     )
     assert reconstructed_plan == plan
     d0 = app._create_delta([c1], None)
@@ -454,10 +454,10 @@ def test_reconstruct_tree_independent(app, independent_commits, anchor_commit):
     reconstructed_tree = app.reconstruct_tree()
     reconstructed_plan = app.render_plan(reconstructed_tree)
     plan = (
-        f"d0 {c1.short_str}\n"
-        f"d1 {c2.short_str}\n"
-        f"d2 {c3.short_str}\n"
-        f"d3 {c4.short_str}"
+        f"0 {c1.short_str}\n"
+        f"1 {c2.short_str}\n"
+        f"2 {c3.short_str}\n"
+        f"3 {c4.short_str}"
     )
     assert reconstructed_plan == plan
     d0 = app._create_delta([c1], None)
@@ -549,7 +549,7 @@ def test_reconstruct_tree_branch_label_first(app, commit, create_branch):
     d {c1.sha} {c1.short_message}
     d {c2.sha} {c2.short_message}
     d1 {c3.sha} {c3.short_message}
-    d2@ {c4.sha} {c4.short_message}
+    d2@d {c4.sha} {c4.short_message}
     """
     tree = app.parse_plan(plan)
     write_plan(tree)

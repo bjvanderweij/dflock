@@ -998,7 +998,9 @@ def status(app, show_targets) -> None:
 @undiverged
 @on_local
 def remix(app) -> None:
-    """Alias for "git rebase -i <upstream>".
+    """Start an interactive rebase of the local commits.
+
+    Alias for "git rebase -i <upstream>".
 
     Only works when on local branch.
     """
@@ -1018,7 +1020,9 @@ def remix(app) -> None:
 @on_local
 @remote_required
 def pull(app) -> None:
-    """Alias for "git pull --rebase <upstream>".
+    """Rebase the local commits onto the upstream.
+
+    Alias for "git pull --rebase <upstream>".
 
     Only works when on local branch.
     """
@@ -1032,7 +1036,10 @@ def pull(app) -> None:
 @pass_app
 @undiverged
 def log(app) -> None:
-    """Alias for "git log <local> ^<upstream>"."""
+    """Show the local commits.
+
+    Alias for "git log <local> ^<upstream>".
+    """
     if utils.get_current_branch() != app.local:
         click.echo("Warning: not on local branch.")
     subprocess.run(f"git log {app.local} ^{app.upstream_name}", shell=True)

@@ -601,7 +601,7 @@ def resolve_delta(name: str, branches: list[str]) -> str:
     name = name.strip()
     if not re.match(r"^[\w-]+$", name):
         raise ValueError(f"Invalid name: {name}")
-    if m := re.match(r"^b?([0-9]+)$", name):
+    if m := re.match(r"^d?([0-9]+)$", name):
         index = int(m.group(1))
         if index < len(branches):
             return branches[index]

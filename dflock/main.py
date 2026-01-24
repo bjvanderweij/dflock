@@ -139,13 +139,17 @@ def pass_app(f):
 def clean_work_tree(f):
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
-        result = utils.run("status", "--untracked-files=no", "--porcelain")
-        if bool(result.strip()):
+        if not _work_tree_is_clean():
             hints = ['use "git stash" to stash uncommitted changes.']
             raise GitStateError("Work tree not clean.", hints=hints)
         return f(*args, **kwargs)
 
     return wrapper
+
+
+def _work_tree_is_clean():
+    result = utils.run("status", "--untracked-files=no", "--porcelain")
+    return not bool(result.strip())
 
 
 class DflockException(Exception):
@@ -609,7 +613,6 @@ def resolve_delta(name: str, branches: list[str]) -> str:
     raise ValueError(f"Could not match {name} to a unique branch")
 
 
-@clean_work_tree
 def write_plan(tree: dict[str, Delta]) -> None:
     """Create feature branches based on the plan in tree.
 
@@ -843,6 +846,9 @@ def push(
     """
     tree = app.reconstruct_tree()
     if write:
+        if not _work_tree_is_clean():
+            hints = ['use "git stash" to stash uncommitted changes.']
+            raise GitStateError("Work tree not clean.", hints=hints)
         with utils.return_to_head():
             write_plan(tree)
         click.echo("Delta branches updated.")
@@ -898,6 +904,7 @@ def push(
     help="Only show the plan without executing it.",
 )
 @inside_work_tree
+@clean_work_tree
 @pass_app
 @valid_local_commits
 @no_hot_branch
@@ -1064,6 +1071,7 @@ def checkout(app, reference) -> None:
 
 @cli_command
 @inside_work_tree
+@clean_work_tree
 @pass_app
 @no_hot_branch
 @undiverged

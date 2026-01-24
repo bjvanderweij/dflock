@@ -174,17 +174,17 @@ def anchor_commit(app, request):
 
 def test_parse_plan__syntax_errors(app, local_commits):
     with pytest.raises(ParsingError):
-        app.parse_plan("s 0 a\na 1 b\ns 2 v") == {}
+        app.parse_plan("# 0 a\na 1 b\n# 2 v") == {}
     with pytest.raises(ParsingError):
         app.parse_plan("d@s 0 a") == {}
     with pytest.raises(ParsingError):
-        app.parse_plan("s 0 a\nb\ns 2 v") == {}
+        app.parse_plan("# 0 a\nb\n# 2 v") == {}
 
 
 def test_parse_plan__illegal_plans(app, local_commits):
     with pytest.raises(PlanError, match="cannot match"):
         # Unrecognized commit
-        app.parse_plan("s 0 a\nd1 a\ns 2 v") == {}
+        app.parse_plan("# 0 a\nd1 a\n# 2 v") == {}
     with pytest.raises(PlanError, match="cannot match"):
         # Out of order commits
         app.parse_plan("d 1 a\nd 0 foo") == {}
@@ -207,15 +207,15 @@ def test_parse_plan__legal_plans(app, local_commits, anchor_commit):
     # Equivalent plans
     delta = app._create_delta([c], None)
     tree = {delta.branch_name: delta}
-    v0 = app.parse_plan("s 0 a\ns 1 b\nd0 2 v")
-    v1 = app.parse_plan("s 0 a\nd0 2 v")
+    v0 = app.parse_plan("# 0 a\n# 1 b\nd0 2 v")
+    v1 = app.parse_plan("# 0 a\nd0 2 v")
     v2 = app.parse_plan("d0 2 v")
     v3 = app.parse_plan("d 2 v")
     v4 = app.parse_plan("d 2")
     assert v0 == v1 == v2 == v3 == v4 == tree
     # Empty plans
     assert app.parse_plan("") == {}
-    assert app.parse_plan("s 0 a\ns 1 b\ns 2 v") == {}
+    assert app.parse_plan("# 0 a\n# 1 b\n# 2 v") == {}
     # Optional target specifications
     d0 = app._create_delta([a], None)
     d1 = app._create_delta([b, c], d0)
@@ -227,7 +227,7 @@ def test_parse_plan__legal_plans(app, local_commits, anchor_commit):
     assert tree == variant_1 == variant_2 == variant_3 == variant_4
     d0 = app._create_delta([a, c], None)
     tree = {d0.branch_name: d0}
-    assert app.parse_plan("d 0 a\ns 1 foo\nd 2 v") == tree
+    assert app.parse_plan("d 0 a\n# 1 foo\nd 2 v") == tree
     d0 = app._create_delta([a], None)
     d1 = app._create_delta([b], d0)
     d2 = app._create_delta([c], d1)

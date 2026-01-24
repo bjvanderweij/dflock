@@ -24,14 +24,13 @@ INSTRUCTIONS = """
 
 # Edit the integration plan.
 #
-# Commands:
-# d<label> <commit> = use commit in labeled delta
-# d<label>@d<target-label> <commit> = use commit in labeled delta depending on
+# Instructions syntax:
+# <label> <commit> = use commit in labeled delta
+# <label>@d<target-label> <commit> = use commit in labeled delta depending on
 #                                     delta with target-label
-# s <commit> = do not use commit
+# to ignore a commit, either comment it out or delete the line.
 #
-# If you delete a line, the commit will not be used (equivalent to "#")
-# If you remove everything, the plan creation is aborted.
+# If no instructions are given, plan creation is aborted.
 #
 """
 
@@ -420,7 +419,7 @@ class App:
             command = "#"
             for delta, index in delta_indices.items():
                 if commit in delta.commits:
-                    command = f"d{index}"
+                    command = f"{index}"
                     if delta.target is not None:
                         command += f"@{delta_indices[delta.target]}"
                     lines.append(f"{command} {commit.short_str}")
@@ -476,7 +475,7 @@ class App:
                     status = " (diverged)"
             except NoRemoteTrackingBranch:
                 status = " (not pushed)"
-            line = f"{'d' + str(i):>4}: {branch}{status}"
+            line = f"{str(i):>4}: {branch}{status}"
             if highlight == branch:
                 click.echo("\033[92m" + line + "\033[0m")
             else:
@@ -577,7 +576,7 @@ def _tokenize_plan(plan: str) -> typing.Iterable[_BranchCommand]:
             delta_spec, sha, *_ = line.split()
         except ValueError:
             raise ParsingError(
-                "each line should contain at least a command and a commit SHA"
+                "each line should contain at least a delta specification and a commit SHA"
             )
         m = re.match(r"([0-9a-z]+)(@([0-9a-z]+))?$", delta_spec)
         if m is not None:
@@ -834,13 +833,10 @@ def push(
     The optional argument DELTA_REFERENCES is a list of delta references. If
     provided, only these deltas as pushed.
 
-    If a delta reference is number (optionally prefixed by 'd') it resolves to
-    the branch with that number in the output of dfl status.
-    , checkout the delta branch
-    that has that label in the output of "dfl status".
-
-    If not a number, match against delta-branch names and if there is a unique
-    match, checkout that branch.
+    If a delta reference is number it resolves to the delta branch with that
+    number in the output of dfl status. Otherwise, if there is exactly one
+    delta branch whose name contains the reference, it resolves to that delta
+    branch.
     """
     tree = app.reconstruct_tree()
     if write:
@@ -1056,12 +1052,10 @@ def checkout(app, reference) -> None:
     If REFERENCE isn't provided, "local", or the name of the local branch,
     checkout the local branch.
 
-    Otherwise, REFERENCE is treated as a delta reference. If it is a number
-    (optionally prefixed by 'd'), checkout the delta branch that has that label
-    in the output of "dfl status".
-
-    If not a number, match against delta-branch names and if there is a unique
-    match, checkout that branch.
+    Otherwise, if the reference is a number, checkout the delta branch that
+    has that label in the output of "dfl status". If it is not a number, and
+    there is exactly one delta branch whose name contains the reference,
+    checkout that delta branch.
     """
     if reference in ["local", app.local, None]:
         branch = app.local

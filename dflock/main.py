@@ -1,6 +1,7 @@
 import configparser
 import functools
 import re
+import shlex
 import subprocess
 import tempfile
 import typing
@@ -985,6 +986,43 @@ def status(app, show_targets) -> None:
         click.echo(
             '\nRun "dfl checkout <delta number>" to check out an ephemeral branch.'
         )
+
+
+def match_local_commit(app, local_commit_description) -> Commit:
+    local_commits = app._get_branch_commits()
+    if local_commit_description is None:
+        commit = local_commits[-1]
+    else:
+        matching_commits = []
+        for c in local_commits:
+            if local_commit_description.lower() in c.message.lower():
+                click.echo(f"Matched commit: {c.message}")
+                matching_commits.append(c)
+        if len(matching_commits) > 1:
+            raise click.ClickException("Multiple matching commits found.")
+        elif len(matching_commits) == 0:
+            raise click.ClickException("No matching commits found.")
+        (commit,) = matching_commits
+    return commit
+
+
+@cli_command
+@click.argument("local-commit-description", required=False, default=None, type=str)
+@inside_work_tree
+@pass_app
+@undiverged
+@on_local
+def fixup(app, local_commit_description: None | str) -> None:
+    """Fix up a local commit."""
+    commit = match_local_commit(app, local_commit_description)
+    message = shlex.quote(f"fixup! {commit.message}")
+    result = subprocess.run(f"git commit -m {message}", shell=True)
+    if result.returncode != 0:
+        raise click.ClickException("Git commit failed.")
+    print(f"git rebase {app.upstream_name} --autostash --autosquash")
+    subprocess.run(
+        f"git rebase {app.upstream_name} --autostash --autosquash", shell=True
+    )
 
 
 @cli_command

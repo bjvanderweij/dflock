@@ -933,7 +933,10 @@ def plan(app, strategy, edit, show) -> None:
     else:
         raise ValueError("This shouldn't happen")
     plan = app.render_plan(tree)
-    if (edit or strategy == "detect") and not show:
+    if show:
+        click.echo(plan + INSTRUCTIONS)
+        return
+    if edit or strategy == "detect":
         new_plan = edit_interactively(plan + INSTRUCTIONS, app.editor)
         new_plan = "\n".join(iterate_plan(new_plan))
         if not new_plan.strip():
@@ -941,19 +944,18 @@ def plan(app, strategy, edit, show) -> None:
             return
     else:
         new_plan = plan
-    if not show:
-        try:
-            tree = app.parse_plan(new_plan)
-            with utils.return_to_head():
-                write_plan(tree)
-            app.prune_local_branches(tree=tree)
-            if len(tree) > 0:
-                click.echo("Deltas written:")
-                app.print_deltas({b: None for b in tree.keys()})
-                click.echo(f'Run "dfl push" to push them to remote {app.remote}.')
-        except (ParsingError, PlanError, CherryPickFailed) as exc:
-            click.echo(f"Received plan:\n\n{new_plan}\n")
-            exc.handle_in_cli()
+    try:
+        tree = app.parse_plan(new_plan)
+        with utils.return_to_head():
+            write_plan(tree)
+        app.prune_local_branches(tree=tree)
+        if len(tree) > 0:
+            click.echo("Deltas written:")
+            app.print_deltas({b: None for b in tree.keys()})
+            click.echo(f'Run "dfl push" to push them to remote {app.remote}.')
+    except (ParsingError, PlanError, CherryPickFailed) as exc:
+        click.echo(f"Received plan:\n\n{new_plan}\n")
+        exc.handle_in_cli()
 
 
 @cli_command

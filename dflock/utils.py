@@ -33,13 +33,12 @@ def get_repository_root() -> Path:
 
 
 def get_head() -> str:
-    with open(get_repository_root() / ".git" / "HEAD") as f:
-        head = f.read().strip()
-    if head.startswith("ref: "):
-        ref = head.split()[1]
-        assert ref.startswith("refs/heads/")
-        return ref[len("refs/heads/") :]
-    return head
+    try:
+        return run("symbolic-ref", "--short", "HEAD").strip()
+    except subprocess.CalledProcessError as exc:
+        if exc.returncode == 128:
+            return run("rev-parse", "HEAD").strip()
+        raise
 
 
 def object_exists(rev):

@@ -536,6 +536,21 @@ def test_plan__work_tree_not_clean(runner, git_repository, commit, create_branch
     assert "Work tree not clean." in result.output
 
 
+def test_plan__show__work_tree_not_clean(
+    runner, git_repository, commit, create_branch
+):
+    commit(dict(a="a"), "0")
+    create_branch(UPSTREAM)
+    commit(dict(a="aa"), "1")
+    create_branch(LOCAL)
+    with open(git_repository / "a", "w") as f:
+        f.write("ab")
+    result = runner.invoke(cli_group, ["plan", "--show"])
+    assert result.exit_code == 0
+    first_line = result.output.splitlines()[0]
+    assert first_line.startswith("# ") and first_line.endswith(" 1")
+
+
 def test_reconstruct_tree_branch_label_first(app, commit, create_branch):
     commit(dict(a="a"), "0")
     create_branch(UPSTREAM)

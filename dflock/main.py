@@ -898,7 +898,6 @@ def push(
     help="Only show the plan without executing it.",
 )
 @inside_work_tree
-@clean_work_tree
 @pass_app
 @valid_local_commits
 @no_hot_branch
@@ -932,6 +931,9 @@ def plan(app, strategy, edit, show) -> None:
     if show:
         click.echo(plan + INSTRUCTIONS)
         return
+    if not _work_tree_is_clean():
+        hints = ['use "git stash" to stash uncommitted changes.']
+        raise GitStateError("Work tree not clean.", hints=hints)
     if edit or strategy == "detect":
         new_plan = edit_interactively(plan + INSTRUCTIONS, app.editor)
         new_plan = "\n".join(iterate_plan(new_plan))

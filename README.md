@@ -54,13 +54,13 @@ The initial plan created by dflock shows the three commits that exist on your lo
 It looks like this:
 
 ```git
-s c1 Update README with overview of commands
-s c2 Add functionality to update change requests to App class
-s c3 Add --update-change-request flag to push command
+# c1 Update README with overview of commands
+# c2 Add functionality to update change requests to App class
+# c3 Add --update-change-request flag to push command
 ```
 
 The commits here are indicated by `c1`, `c2`, and `c3`, but normally the shortened commit hash would be shown.
-The `s` directive tells dflock to skip the commit on that line, so the plan above doesn't do anything.
+The `#` sign tells dflock to skip the commit on that line, so the plan above doesn't do anything.
 You can find more information about the integration plan syntax [here](#the-integration-plan).
 
 > [!NOTE]
@@ -69,41 +69,39 @@ You can find more information about the integration plan syntax [here](#the-inte
 To create change requests, we can edit the plan to look, for example, like this:
 
 ```git
-d1 c1 Update README with overview of commands
-d2 c2 Add functionality to update change requests to App class
-d3@d2 c3 Add --update-change-request flag to push command
+1 c1 Update README with overview of commands
+2 c2 Add functionality to update change requests to App class
+3@2 c3 Add --update-change-request flag to push command
 ```
 
-Here, `d1`, `d2`, and `d3@d2` are directives.
-The `d` prefix tells dflock to create a change request.
-A numeric label differentiates change requests.
+Here, the `#` sign has been replaced by delta *labels* (in this case, `1`, `2`, and `3`), which tells dflock to create a change requests.
 The `@` symbol indicates a dependency and that the change request should be stacked on another.
 
 The above plan assumes that commits `c1` and `c2` are independent, and that commit `c3` depends on the previous one.
-Based on this plan, dflock will create three branches that we'll call `d1`, `d2`, and `d3` and cherry-pick the corresponding commits into them.
+Based on this plan, dflock will create three branches that we'll call `1`, `2`, and `3` and cherry-pick the corresponding commits into them.
 This creates the situation illustrated below.
 
 ```
 origin/main ------> c0
                    / \
                   /\  c1
-         d1 --> c1* \  \
-         d2 ------> c2* c2
+          1 --> c1* \  \
+          2 ------> c2* c2
                       \  \
-         d3 --------> c3* c3 <--- main
+          3 --------> c3* c3 <--- main
 ```
 
 Cherry-picking will only be successfully if the changes in `c2` do not conflict with (i.e., change parts of files that were changed in) `c1`.
 
-The created branches can be used to create three change requests: the target branch of `d1` and `d2` is the upstream, while `d3` targets `d2`. Note that GitHub uses the term *base branch* for what is referred to here as the target branch.
+The created branches can be used to create three change requests: the target branch of `1` and `2` is the upstream, while `3` targets `2`. Note that GitHub uses the term *base branch* for what is referred to here as the target branch.
 
 | Change request | Branch | Target branch |
 | -------------- | ------ | ------------- |
-| CR1            | d1     | main          |
-| CR2            | d2     | main          |
-| CR3            | d3     | d2            |
+| CR1            |  1     | main          |
+| CR2            |  2     | main          |
+| CR3            |  3     |  2            |
 
-The change requests for `d1` and `d2` are independent and can be integrated in any order, but the change request for `d3` is stacked on `d2` and requires the change request for `d2` to be integrated first.
+The change requests for `1` and `2` are independent and can be integrated in any order, but the change request for `3` is stacked on `2` and requires the change request for `2` to be integrated first.
 
 Dflock remembers the plan, even after more commits have been added or after some change requests have been integrated into the upstream branch.
 This makes it easy to revisit the plan later---for example to add more commits to change requests or to create ones.
@@ -206,21 +204,20 @@ The integration plan plays a central role in dflock.
 An example plan is shown below.
 
 ```
-d c1 Update README with overview of commands
-s c2 Add functionality to update change requests to App class
-d3@d c3 Add --update-change-request flag to push command
+1 c1 Update README with overview of commands
+# c2 Add functionality to update change requests to App class
+3@1 c3 Add --update-change-request flag to push command
 ```
 
 Each line of the plan corresponds to a commit and is structured as follows: `<directive> <short commit hash> <first line of commit message>`.
-The `s` directive tells dflock to skip that line.
+The `#` directive tells dflock to skip that line.
 Alternatively, the line can be [omitted entirely](#syntactical-rules).
 
-If a directive starts with `d`  tells dflock to add the commit to a delta.
-To distinguish between different deltas, a numeric label can be appended to the directive.
-For example, `d0` and `d1` indicate different deltas.
+Any alphanumeric character can be used to label a delta and tell dflock to add the commit to that delta.
+In the example above, the labels `1` and `3` indicate different deltas.
 
 The `@` symbol followed by a numeric label specifies dependencies between deltas.
-For example, `d1@d0` creates a delta that depends on `d0`.
+For example, `3@1` creates a delta that depends on delta `1`.
 
 ### Example plans
 
@@ -233,9 +230,9 @@ You can selectively add commits to a delta.
 In the example below, only commit 1 is included in the delta, while commits 0 and 2 are skipped.
 
 ```
-s 0 ...
-d0 1 ...
-s 2 ...
+# 0 ...
+0 1 ...
+# 2 ...
 ```
 
 
@@ -246,9 +243,9 @@ You can also add multiple commits to a change request.
 The plan below creates a single change request containing commit 1 and 2.
 
 ```
-s 0 ...
-d0 1 ...
-d0 2 ...
+# 0 ...
+0 1 ...
+0 2 ...
 ```
 
 #### Non-contiguous commits in one change request
@@ -258,9 +255,9 @@ Commits in a plan don't need to follow each other sequentially.
 The plan below creates a single change request containing commit 0 and 2.
 
 ```
-d0 0 ...
-s 1 ...
-d0 2 ...
+0 0 ...
+# 1 ...
+0 2 ...
 ```
 
 #### Fully stacked change requests
@@ -271,9 +268,9 @@ Dflock calls this type of plan *fully stacked*.
 The example below shows a fully stacked plan.
 
 ```
-d0 0 ...
-d1@0 1 ...
-d2@1 2 ...
+0 0 ...
+1@0 1 ...
+2@1 2 ...
 ```
 
 #### Fully independent change requests
@@ -283,18 +280,14 @@ You can create independent change requests that can be integrated in an order di
 The plan below creates three fully independent change requests that can be integrated into the upstream branch in any order.
 
 ```
-d0 0 ...
-d1 1 ...
-d2 2 ...
+0 0 ...
+1 1 ...
+2 2 ...
 ```
 
 ### Syntactical rules
 
 Because plans are manually edited in a text editor, dflock supports several shortcuts that reduce amount of editing required to create unambiguous plans.
-
-#### The `d` prefix can be omitted when referring to deltas after `@`
-
-The directives `d1@d0` and `d1@0` are equivalent.
 
 #### Skipping a commit is the same as deleting the entire line
 
@@ -303,57 +296,39 @@ You can simply remove lines containing commits you don't (yet) want to add to an
 For example, the two plans below are equivalent.
 
 ```
-s 0 ...
-d1 1 ...
+# 0 ...
+1 1 ...
 ```
 
 ```
-d1 1 ...
+1 1 ...
 ```
 
-#### Delta labels can be omitted
+#### Any lowercase alphanumeric string can serve as delta label
 
-If a bare "d" is used as a directive, this serves as a distinguising label.
+Anything that matches the regex `[0-9a-z]+` works as a delta label.
 
-The following example shows how to create two different deltas using a bare "d" and "d0" directive.
-
-```
-d 0 ...
-d0 1 ...
-```
-
-The above plan is equivalent to the plan below, which uses numeric labels and therefore requires a bit more writing.
+For example:
 
 ```
-d0 0 ...
-d1 1 ...
-```
-
-You can refer to these deltas with "@" directives as follows:
-
-```
-d 0 ...
-d0@d 1 ...
-```
-
-The same thing can be achieved with numeric labels and again a bit more typing as follows:
-
-```
-d0 0 ...
-d1@d0 1 ...
+x   0 ...
+y   1 ...
+foo 2 ...
+d0  3 ...
+1   4 ...
 ```
 
 #### Dependencies need to be specified only once
 
 If you add multiple commits to a delta that has a dependency on another delta, you only need to specify that dependency once.
 
-For example, the plan below adds two commits to `d1`, which depends on `d0`.
-The dependency is indicated only on the final line which starts with `d1@d0`.
+For example, the plan below adds two commits to `1`, which depends on `0`.
+The dependency is indicated only on the final line which starts with `1@0`.
 
 ```
-d0 0 ...
-d1 1 ...
-d1@d0 2 ...
+0 0 ...
+1 1 ...
+1@0 2 ...
 ```
 
 ## How does dflock remember plans?
@@ -379,35 +354,35 @@ Some of these constraints aren't inherent to the workflow and might be lifted in
 #### A delta cannot depend on multiple other deltas
 
 It isn't possible to specify multiple dependencies for a delta.
-For example, if you have three deltas: `d0`, `d1`, and `d2`, it isn't possible to make `d2` depend on both `d0` and `d1` if `d0` and `d1` are independent.
+For example, if you have three deltas: `0`, `1`, and `2`, it isn't possible to make `2` depend on both `0` and `1` if `0` and `1` are independent.
 
-The only way around this is to make `d2` dependent on `d1` and `d1` dependent on `d0` as illustrated in the plan below.
+The only way around this is to make `2` dependent on `1` and `1` dependent on `0` as illustrated in the plan below.
 
 ```
-d0 0 ...
-d1@d0 1 ...
-d2@d1 2 ...
+0 0 ...
+1@0 1 ...
+2@1 2 ...
 ```
 
 #### Delta dependencies cannot cross
 
 Once delta with a dependency occurs in a plan, all deltas following it must at least have the same dependency or depend on a delta following it.
 
-For example, the following plan isn't allowed because `d1` depends on `d0`, and all change requests after `d1` must also depend on `d0` or change requests that came after it.
+For example, the following plan isn't allowed because `1` depends on `0`, and all change requests after `1` must also depend on `0` or change requests that came after it.
 
 ```
-d0 0 ...
-d1@d0 1 ...
-d2 2 ...
+0 0 ...
+1@0 1 ...
+2 2 ...
 ```
 
 In this particular situation, we can use `dfl remix` to re-order commits such that a valid plan can be constructed.
 By swapping commits 2 and 1 we can construct the following valid plan:
 
 ```
-d0 0 ...
-d1 2 ...
-d1@d0 1 ...
+0 0 ...
+1 2 ...
+1@0 1 ...
 ```
 
 ## Stacked merge requests on GitLab
@@ -421,20 +396,20 @@ Suppose that you want to create three stacked merge requests out of three subseq
 To do this, use `dfl plan` to create an [integration plan](#the-integration-plan) and create three stacked deltas as shown below.
 
 ```
-d1 c1 ...
-d2@1 c2 ...
-d3@2 c3 ...
+1 c1 ...
+2@1 c2 ...
+3@2 c3 ...
 ```
 
 To push these deltas to GitLab and create stacked merge requests automatically, run `dfl push -m` (see [automatic merge request creation](#automatic-merge-request-creation)).
-The target branch of the merge request corresponding to `d1` will be the upstream, for `d2` it's `d1` and for `d3` it's `d2`.
+The target branch of the merge request corresponding to `1` will be the upstream, for `2` it's `1` and for `3` it's `2`.
 
 When viewing these merge requests on Gitlab, their diffs will only show changes of their corresponding deltas.
-That is, the diff of the merge request `d2` will show only changes in `c2` and that of `d3` only the changes in `c3`.
+That is, the diff of the merge request `2` will show only changes in `c2` and that of `3` only the changes in `c3`.
 
-Because these merge requests are stacked, you should merge `d1` first.
-After doing so, GitLab will update the merge request of `d2` to target the upstream instead of `d1`.
-You can then merge `d2` and so on.
+Because these merge requests are stacked, you should merge `1` first.
+After doing so, GitLab will update the merge request of `2` to target the upstream instead of `1`.
+You can then merge `2` and so on.
 
 > [!NOTE]
 > Make sure you select the checkbox for deleting the source branch in each merge request.

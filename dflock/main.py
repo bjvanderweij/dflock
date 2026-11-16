@@ -420,7 +420,7 @@ class App:
             command = "#"
             for delta, index in delta_indices.items():
                 if commit in delta.commits:
-                    command = f"d{index}"
+                    command = f"{index}"
                     if delta.target is not None:
                         command += f"@{delta_indices[delta.target]}"
                     lines.append(f"{command} {commit.short_str}")
@@ -476,7 +476,7 @@ class App:
                     status = " (diverged)"
             except NoRemoteTrackingBranch:
                 status = " (not pushed)"
-            line = f"{'d' + str(i):>4}: {branch}{status}"
+            line = f"{str(i):>4}: {branch}{status}"
             if highlight == branch:
                 click.echo("\033[92m" + line + "\033[0m")
             else:

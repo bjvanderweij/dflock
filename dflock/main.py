@@ -465,9 +465,14 @@ class App:
         )
 
     def print_deltas(
-        self, deltas: dict[str, None | str], highlight: None | str = None
+        self, deltas: dict[str, None | Delta], highlight: None | str = None
     ) -> None:
-        for i, (branch, target) in enumerate(deltas.items()):
+        """Print deltas and their status in human-readable format.
+
+        If Delta objects are supplied, they are used to show the target
+        of each delta. If not, only the delta branch names are printed.
+        """
+        for i, (branch, delta) in enumerate(deltas.items()):
             status = ""
             try:
                 up_to_date = branch_up_to_date(branch)
@@ -480,8 +485,8 @@ class App:
                 click.echo("\033[92m" + line + "\033[0m")
             else:
                 click.echo(line)
-            if target is not None:
-                click.echo(f"{' ' * 6}@ {target}")
+            if delta is not None:
+                click.echo(f"{' ' * 6}@ {delta.target_branch_name}")
 
     def _create_delta(
         self, commits: typing.Sequence[Commit], target: None | Delta

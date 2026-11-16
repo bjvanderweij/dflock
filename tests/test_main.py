@@ -633,14 +633,15 @@ def test_status__show_branches(app, runner, commit, create_branch, git_repositor
 def test_status__show_branches_with_targets(
     app, runner, commit, create_branch, git_repository
 ):
-    commit(dict(a="a"), "a")
+    commit(dict(a="a"), "0")
     create_branch(UPSTREAM)
-    sha = commit(dict(b="b"), "b")
-    c0 = Commit(sha, "b")
-    branch_name = app.get_commit_branch_name(c0)
-    create_branch(branch_name)
+    commit(dict(a="aa"), "1")
+    commit(dict(b="b"), "2")
     create_branch(LOCAL)
-    result = runner.invoke(cli_group, ["status", "--show-targets"])
+    c1, c2 = app._get_branch_commits()
+    write_plan(app.parse_plan(f"d0 {c1.sha}\nd1@d0 {c2.sha}"))
+    result = runner.invoke(cli_group, ["status", "-t"])
     assert result.exit_code == 0
-    assert "Deltas:" in result.output
-    assert branch_name in result.output
+    assert f"@ {UPSTREAM}" in result.output
+    assert f"@ {app.get_commit_branch_name(c1)}" in result.output
+    assert "with commits" not in result.output

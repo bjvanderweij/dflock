@@ -1128,7 +1128,7 @@ def init() -> None:
     editor = click.prompt("Command for invoking your editor?", default=DEFAULT_EDITOR)
     config_path = root_path / ".dflock"
     click.confirm(
-        f"Continue to write provided values to {config_path}?", abort=True, default="Y"
+        f"Continue to write provided values to {config_path}?", abort=True, default=True
     )
     config = configparser.ConfigParser()
     with open(config_path, "w") as f:
